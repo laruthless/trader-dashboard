@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Trader Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111418;
+    --surface2: #181c22;
+    --border: #1e242d;
+    --border2: #252d38;
+    --text: #e8edf2;
+    --text2: #7a8899;
+    --text3: #3d4a58;
+    --green: #00e5a0;
+    --green-dim: #00e5a018;
+    --green-mid: #00e5a040;
+    --red: #ff4d6a;
+    --red-dim: #ff4d6a18;
+    --red-mid: #ff4d6a40;
+    --amber: #f5a623;
+    --amber-dim: #f5a62318;
+    --blue: #4a9eff;
+    --blue-dim: #4a9eff18;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; }
+  body { min-height: 100vh; }
+
+  /* Layout */
+  .shell { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
+
+  /* Header */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+  .header-left .logo { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.2em; color: var(--text3); text-transform: uppercase; margin-bottom: 6px; }
+  .header-left .date-line { font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--text); }
+  .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .market-badge { font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.12em; padding: 4px 10px; border-radius: 3px; }
+  .badge-open { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-mid); }
+  .badge-pre { background: var(--amber-dim); color: var(--amber); border: 1px solid #f5a62340; }
+  .badge-closed { background: var(--surface2); color: var(--text2); border: 1px solid var(--border2); }
+  .time-display { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  /* Sections */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 12px; }
+  .section-label { font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.18em; color: var(--text3); text-transform: uppercase; margin-bottom: 16px; }
+
+  /* Checklist */
+  .check-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; transition: opacity 0.2s; }
+  .check-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .check-item:first-child { padding-top: 0; }
+  .check-box { width: 18px; height: 18px; border: 1px solid var(--border2); border-radius: 3px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .check-item.checked .check-box { background: var(--green); border-color: var(--green); }
+  .check-item.checked .check-box::after { content: ''; display: block; width: 5px; height: 9px; border: 2px solid #000; border-top: none; border-left: none; transform: rotate(45deg) translate(-1px,-1px); }
+  .check-item.checked .check-text { color: var(--text3); text-decoration: line-through; }
+  .check-text { font-size: 13px; color: var(--text2); }
+
+  /* Risk Calculator */
+  .acct-input-row { display: flex; gap: 10px; margin-bottom: 16px; }
+  .acct-input-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 10px 14px; font-family: var(--mono); font-size: 15px; color: var(--text); outline: none; transition: border-color 0.15s; }
+  .acct-input-row input:focus { border-color: var(--blue); }
+  .acct-input-row input::placeholder { color: var(--text3); }
+  .risk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  .risk-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; text-align: center; }
+  .risk-card-label { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-bottom: 6px; }
+  .risk-card-val { font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--amber); }
+  .confirm-risk-btn { width: 100%; padding: 10px; background: transparent; border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text2); font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; cursor: pointer; transition: all 0.15s; }
+  .confirm-risk-btn:hover { border-color: var(--green); color: var(--green); }
+  .confirm-risk-btn.confirmed { background: var(--green-dim); border-color: var(--green-mid); color: var(--green); }
+
+  /* P&L */
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab-btn { font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; padding: 6px 14px; border-radius: 3px; border: 1px solid transparent; color: var(--text3); background: transparent; cursor: pointer; transition: all 0.15s; }
+  .tab-btn.active { color: var(--text); border-color: var(--border2); background: var(--surface2); }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .stat { background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; }
+  .stat-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: var(--text3); margin-bottom: 4px; text-transform: uppercase; }
+  .stat-val { font-family: var(--mono); font-size: 16px; font-weight: 600; color: var(--text); }
+  .stat-val.pos { color: var(--green); }
+  .stat-val.neg { color: var(--red); }
+  .add-trade-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 14px; }
+  .add-trade-row input { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 8px 12px; font-family: var(--mono); font-size: 13px; color: var(--text); outline: none; }
+  .add-trade-row input:focus { border-color: var(--blue); }
+  .add-trade-row input::placeholder { color: var(--text3); }
+  .add-btn { background: transparent; border: 1px solid var(--border2); border-radius: var(--radius); padding: 8px 14px; color: var(--text2); font-family: var(--mono); font-size: 11px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+  .add-btn:hover { border-color: var(--green); color: var(--green); }
+  .trade-list { }
+  .trade-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 12px; }
+  .trade-row:last-child { border-bottom: none; }
+  .trade-sym { color: var(--blue); font-weight: 500; min-width: 60px; }
+  .trade-pnl { font-weight: 600; }
+  .trade-remove { color: var(--text3); cursor: pointer; font-size: 11px; transition: color 0.1s; }
+  .trade-remove:hover { color: var(--red); }
+  .hist-table { width: 100%; font-family: var(--mono); font-size: 12px; border-collapse: collapse; }
+  .hist-table th { text-align: left; color: var(--text3); font-size: 10px; letter-spacing: 0.1em; padding: 0 0 8px; border-bottom: 1px solid var(--border); }
+  .hist-table td { padding: 7px 0; border-bottom: 1px solid var(--border); color: var(--text2); }
+  .hist-table tr:last-child td { border-bottom: none; }
+  .hist-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+
+  /* News */
+  .movers-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+  .mover { background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; border: 1px solid var(--border); }
+  .mover-sym { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .mover-chg { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+  .mover-reason { font-size: 11px; color: var(--text2); margin-top: 3px; line-height: 1.4; }
+  .chg-pos { color: var(--green); }
+  .chg-neg { color: var(--red); }
+  .news-list { }
+  .news-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .news-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .news-item:first-child { padding-top: 0; }
+  .news-hl { font-size: 13px; color: var(--text); line-height: 1.5; margin-bottom: 4px; }
+  .news-meta { display: flex; gap: 8px; align-items: center; }
+  .news-src { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .news-impact { font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 2px; }
+  .impact-pos { background: var(--green-dim); color: var(--green); }
+  .impact-neg { background: var(--red-dim); color: var(--red); }
+  .news-loading { font-family: var(--mono); font-size: 11px; color: var(--text3); padding: 12px 0; }
+  .news-sub-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; color: var(--text3); text-transform: uppercase; margin-bottom: 10px; }
+
+  /* Journal */
+  .journal-ta { width: 100%; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 12px 14px; font-family: var(--sans); font-size: 13px; color: var(--text); line-height: 1.6; resize: vertical; min-height: 100px; outline: none; }
+  .journal-ta:focus { border-color: var(--blue); }
+  .journal-ta::placeholder { color: var(--text3); }
+  .journal-saved { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-top: 6px; min-height: 14px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  @media (max-width: 520px) {
+    .risk-grid { grid-template-columns: repeat(3, 1fr); }
+    .stat-row { grid-template-columns: repeat(3, 1fr); }
+    .movers-grid { grid-template-columns: 1fr 1fr; }
+    .header-left .date-line { font-size: 15px; }
+    .add-trade-row { grid-template-columns: 1fr 1fr; }
+    .add-trade-row .add-btn { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">Trader Dashboard</div>
+      <div class="date-line" id="dateDisplay"></div>
+    </div>
+    <div class="header-right">
+      <div class="market-badge" id="marketBadge"></div>
+      <div class="time-display" id="clockDisplay"></div>
+    </div>
+  </div>
+
+  <!-- Checklist -->
+  <div class="section">
+    <div class="section-label">Morning checklist</div>
+    <div id="checklistContainer">
+      <div class="check-item" id="ck0" onclick="toggleCheck(0)">
+        <div class="check-box"></div>
+        <span class="check-text">Enter account value & update hotkeys in DAS Trader Pro</span>
+      </div>
+      <div class="check-item" id="ck1" onclick="toggleCheck(1)">
+        <div class="check-box"></div>
+        <span class="check-text">Review pre-market movers & news</span>
+      </div>
+      <div class="check-item" id="ck2" onclick="toggleCheck(2)">
+        <div class="check-box"></div>
+        <span class="check-text">Set daily max loss limit</span>
+      </div>
+      <div class="check-item" id="ck3" onclick="toggleCheck(3)">
+        <div class="check-box"></div>
+        <span class="check-text">Review yesterday's journal notes</span>
+      </div>
+      <div class="check-item" id="ck4" onclick="toggleCheck(4)">
+        <div class="check-box"></div>
+        <span class="check-text">DAS Trader Pro loaded & ready</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Calculator -->
+  <div class="section">
+    <div class="section-label">Hotkey risk calculator</div>
+    <div class="acct-input-row">
+      <input type="number" id="acctInput" placeholder="Account value today ($)" oninput="calcRisk()" />
+    </div>
+    <div class="risk-grid" id="riskGrid" style="display:none;">
+      <div class="risk-card"><div class="risk-card-label">0.5% risk</div><div class="risk-card-val" id="r05">—</div></div>
+      <div class="risk-card"><div class="risk-card-label">1% risk</div><div class="risk-card-val" id="r1">—</div></div>
+      <div class="risk-card"><div class="risk-card-label">2% risk</div><div class="risk-card-val" id="r2">—</div></div>
+    </div>
+    <button class="confirm-risk-btn" id="riskBtn" onclick="confirmRisk()" style="display:none;">CONFIRM — HOTKEYS UPDATED IN DAS TRADER PRO</button>
+  </div>
+
+  <!-- P&L Tracker -->
+  <div class="section">
+    <div class="section-label">P&L tracker</div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('today', this)">Today</button>
+      <button class="tab-btn" onclick="switchTab('week', this)">Week</button>
+      <button class="tab-btn" onclick="switchTab('month', this)">Month</button>
+    </div>
+
+    <div class="tab-pane active" id="pane-today">
+      <div class="stat-row">
+        <div class="stat"><div class="stat-label">P&L</div><div class="stat-val" id="s-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-label">Trades</div><div class="stat-val" id="s-trades">0</div></div>
+        <div class="stat"><div class="stat-label">Win rate</div><div class="stat-val" id="s-wr">—</div></div>
+      </div>
+      <div class="add-trade-row">
+        <input type="number" id="tAmt" placeholder="P&L ($)" />
+        <input type="text" id="tSym" placeholder="Ticker" style="text-transform:uppercase;" />
+        <button class="add-btn" onclick="addTrade()">+ Add</button>
+      </div>
+      <div class="trade-list" id="tradeList"></div>
+    </div>
+
+    <div class="tab-pane" id="pane-week">
+      <div class="hist-summary">
+        <div class="stat"><div class="stat-label">Week P&L</div><div class="stat-val" id="w-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-label">Days</div><div class="stat-val" id="w-days">0</div></div>
+      </div>
+      <table class="hist-table"><thead><tr><th>Date</th><th>P&L</th><th>Trades</th></tr></thead><tbody id="w-body"></tbody></table>
+    </div>
+
+    <div class="tab-pane" id="pane-month">
+      <div class="hist-summary">
+        <div class="stat"><div class="stat-label">Month P&L</div><div class="stat-val" id="m-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-label">Days</div><div class="stat-val" id="m-days">0</div></div>
+      </div>
+      <table class="hist-table"><thead><tr><th>Date</th><th>P&L</th><th>Trades</th></tr></thead><tbody id="m-body"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Pre-market -->
+  <div class="section">
+    <div class="section-label">Pre-market movers & news</div>
+    <div id="newsArea"><div class="news-loading">Fetching pre-market data...</div></div>
+    <button onclick="loadNews()" style="margin-top:12px;background:transparent;border:1px solid var(--border2);border-radius:var(--radius);padding:6px 14px;font-family:var(--mono);font-size:10px;color:var(--text3);cursor:pointer;letter-spacing:0.1em;" id="refreshBtn">↻ REFRESH</button>
+  </div>
+
+  <!-- Journal -->
+  <div class="section">
+    <div class="section-label">Trading journal — <span id="journalDateLabel" style="color:var(--text3);"></span></div>
+    <textarea class="journal-ta" id="journalTA" placeholder="Pre-market plan, trade rationale, emotions, lessons learned..." oninput="saveJournal()"></textarea>
+    <div class="journal-saved" id="journalStatus"></div>
+  </div>
+
+</div>
+
+<script>
+// ─── Utilities ─────────────────────────────────────────────────────
+const todayKey = () => new Date().toISOString().slice(0,10);
+const fmt = v => (v >= 0 ? '$' : '-$') + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const cls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+
+// ─── Clock & Date ──────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('dateDisplay').textContent = days[now.getDay()] + ', ' + months[now.getMonth()] + ' ' + now.getDate() + ', ' + now.getFullYear();
+  document.getElementById('journalDateLabel').textContent = now.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+  const hh = h % 12 || 12, mm = String(m).padStart(2,'0'), ss = String(s).padStart(2,'0'), ampm = h < 12 ? 'AM' : 'PM';
+  document.getElementById('clockDisplay').textContent = hh + ':' + mm + ':' + ss + ' ' + ampm + ' ET';
+  const total = h * 60 + m, day = now.getDay();
+  const badge = document.getElementById('marketBadge');
+  if (day === 0 || day === 6) { badge.textContent = 'WEEKEND'; badge.className = 'market-badge badge-closed'; }
+  else if (total < 570) { badge.textContent = 'PRE-MARKET'; badge.className = 'market-badge badge-pre'; }
+  else if (total < 960) { badge.textContent = 'MARKET OPEN'; badge.className = 'market-badge badge-open'; }
+  else { badge.textContent = 'MARKET CLOSED'; badge.className = 'market-badge badge-closed'; }
+}
+updateClock(); setInterval(updateClock, 1000);
+
+// ─── Checklist ─────────────────────────────────────────────────────
+let checks = JSON.parse(localStorage.getItem('checks_' + todayKey()) || '[false,false,false,false,false]');
+function renderChecks() {
+  checks.forEach((c, i) => {
+    const el = document.getElementById('ck' + i);
+    if (c) el.classList.add('checked'); else el.classList.remove('checked');
+  });
+}
+function toggleCheck(i) {
+  checks[i] = !checks[i];
+  localStorage.setItem('checks_' + todayKey(), JSON.stringify(checks));
+  renderChecks();
+}
+renderChecks();
+
+// ─── Risk Calculator ───────────────────────────────────────────────
+let savedAcct = localStorage.getItem('acct_' + todayKey()) || '';
+if (savedAcct) { document.getElementById('acctInput').value = savedAcct; calcRisk(); }
+let riskConfirmed = localStorage.getItem('riskConfirmed_' + todayKey()) === 'true';
+if (riskConfirmed) { const b = document.getElementById('riskBtn'); b.classList.add('confirmed'); b.textContent = '✓ HOTKEYS CONFIRMED UPDATED'; }
+
+function calcRisk() {
+  const val = parseFloat(document.getElementById('acctInput').value);
+  if (isNaN(val) || val <= 0) { document.getElementById('riskGrid').style.display = 'none'; document.getElementById('riskBtn').style.display = 'none'; return; }
+  document.getElementById('r05').textContent = fmt(val * 0.005);
+  document.getElementById('r1').textContent = fmt(val * 0.01);
+  document.getElementById('r2').textContent = fmt(val * 0.02);
+  document.getElementById('riskGrid').style.display = 'grid';
+  document.getElementById('riskBtn').style.display = 'block';
+  localStorage.setItem('acct_' + todayKey(), val);
+}
+function confirmRisk() {
+  const b = document.getElementById('riskBtn');
+  b.classList.add('confirmed');
+  b.textContent = '✓ HOTKEYS CONFIRMED UPDATED';
+  localStorage.setItem('riskConfirmed_' + todayKey(), 'true');
+  if (!checks[0]) toggleCheck(0);
+}
+
+// ─── Trades & P&L ──────────────────────────────────────────────────
+let trades = JSON.parse(localStorage.getItem('trades_' + todayKey()) || '[]');
+
+function saveTrades() {
+  localStorage.setItem('trades_' + todayKey(), JSON.stringify(trades));
+  updateHistory();
+}
+function addTrade() {
+  const amt = parseFloat(document.getElementById('tAmt').value);
+  const sym = document.getElementById('tSym').value.trim().toUpperCase() || '—';
+  if (isNaN(amt)) return;
+  trades.push({ sym, amt });
+  document.getElementById('tAmt').value = '';
+  document.getElementById('tSym').value = '';
+  saveTrades(); renderTrades();
+}
+function removeTrade(i) { trades.splice(i, 1); saveTrades(); renderTrades(); }
+function renderTrades() {
+  const list = document.getElementById('tradeList');
+  list.innerHTML = '';
+  let total = 0, wins = 0;
+  trades.forEach((t, i) => {
+    total += t.amt; if (t.amt > 0) wins++;
+    const row = document.createElement('div');
+    row.className = 'trade-row';
+    row.innerHTML = `<span class="trade-sym">${t.sym}</span><span class="trade-pnl ${cls(t.amt)}">${fmt(t.amt)}</span><span class="trade-remove" onclick="removeTrade(${i})">remove</span>`;
+    list.appendChild(row);
+  });
+  const pnlEl = document.getElementById('s-pnl');
+  pnlEl.textContent = fmt(total); pnlEl.className = 'stat-val ' + cls(total);
+  document.getElementById('s-trades').textContent = trades.length;
+  document.getElementById('s-wr').textContent = trades.length ? Math.round(wins / trades.length * 100) + '%' : '—';
+}
+renderTrades();
+
+// ─── History ───────────────────────────────────────────────────────
+function updateHistory() {
+  const hist = JSON.parse(localStorage.getItem('pnl_history') || '{}');
+  const total = trades.reduce((s, t) => s + t.amt, 0);
+  hist[todayKey()] = { pnl: total, count: trades.length };
+  localStorage.setItem('pnl_history', JSON.stringify(hist));
+}
+function renderHistory(period) {
+  const hist = JSON.parse(localStorage.getItem('pnl_history') || '{}');
+  const now = new Date();
+  const entries = Object.entries(hist).filter(([d]) => {
+    const dt = new Date(d + 'T12:00:00');
+    if (period === 'week') { const s = new Date(now); s.setDate(now.getDate() - now.getDay()); return dt >= s; }
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  }).sort((a, b) => b[0].localeCompare(a[0]));
+  const total = entries.reduce((s, [, v]) => s + v.pnl, 0);
+  const p = period === 'week' ? 'w' : 'm';
+  const pnlEl = document.getElementById(p + '-pnl');
+  pnlEl.textContent = fmt(total); pnlEl.className = 'stat-val ' + cls(total);
+  document.getElementById(p + '-days').textContent = entries.length;
+  const tbody = document.getElementById(p + '-body');
+  tbody.innerHTML = '';
+  entries.forEach(([d, v]) => {
+    const dt = new Date(d + 'T12:00:00');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td><td class="${cls(v.pnl)}" style="font-weight:600;">${fmt(v.pnl)}</td><td style="color:var(--text3);">${v.count}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ─── Tabs ──────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('pane-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'week') renderHistory('week');
+  if (name === 'month') renderHistory('month');
+}
+
+// ─── Journal ───────────────────────────────────────────────────────
+const jKey = 'journal_' + todayKey();
+const savedJ = localStorage.getItem(jKey);
+if (savedJ) document.getElementById('journalTA').value = savedJ;
+let jTimer;
+function saveJournal() {
+  clearTimeout(jTimer);
+  jTimer = setTimeout(() => {
+    localStorage.setItem(jKey, document.getElementById('journalTA').value);
+    const s = document.getElementById('journalStatus');
+    s.textContent = 'Saved';
+    setTimeout(() => s.textContent = '', 1500);
+  }, 400);
+}
+
+// ─── Pre-market News ───────────────────────────────────────────────
+async function loadNews() {
+  const area = document.getElementById('newsArea');
+  area.innerHTML = '<div class="news-loading">Fetching pre-market data...</div>';
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{
+          role: 'user',
+          content: 'Search for the top 5 pre-market stock movers today and 4 major market-moving news headlines right now. Return ONLY a raw JSON object (no markdown, no backticks, no explanation): {"movers":[{"symbol":"AAPL","change":"+3.2%","reason":"Beat earnings estimates"}],"news":[{"headline":"Fed holds rates steady","source":"Reuters","impact":"positive"}]}'
+        }]
+      })
+    });
+    const data = await res.json();
+    let parsed = null;
+    for (const b of data.content) {
+      if (b.type === 'text') {
+        try { parsed = JSON.parse(b.text.replace(/```json|```/g,'').trim()); break; } catch(e) {}
+      }
+    }
+    if (!parsed) throw new Error();
+    let html = '';
+    if (parsed.movers && parsed.movers.length) {
+      html += '<div class="news-sub-label">Top movers</div><div class="movers-grid">';
+      parsed.movers.forEach(m => {
+        const up = m.change && m.change.startsWith('+');
+        html += `<div class="mover"><div class="mover-sym">${m.symbol||''}</div><div class="mover-chg ${up?'chg-pos':'chg-neg'}">${m.change||''}</div><div class="mover-reason">${m.reason||''}</div></div>`;
+      });
+      html += '</div>';
+    }
+    if (parsed.news && parsed.news.length) {
+      html += '<div class="news-sub-label" style="margin-top:16px;">Market news</div><div class="news-list">';
+      parsed.news.forEach(n => {
+        const imp = n.impact === 'positive' ? 'pos' : n.impact === 'negative' ? 'neg' : '';
+        html += `<div class="news-item"><div class="news-hl">${n.headline||''}</div><div class="news-meta"><span class="news-src">${n.source||''}</span>${imp ? `<span class="news-impact impact-${imp}">${imp==='pos'?'BULLISH':'BEARISH'}</span>` : ''}</div></div>`;
+      });
+      html += '</div>';
+    }
+    area.innerHTML = html || '<div class="news-loading">No data available.</div>';
+  } catch(e) {
+    area.innerHTML = '<div class="news-loading">Unable to load pre-market data. Check your connection and refresh.</div>';
+  }
+}
+loadNews();
+</script>
+</body>
+</html>
