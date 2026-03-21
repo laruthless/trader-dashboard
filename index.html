@@ -1010,7 +1010,7 @@ function renderScannerResults(d) {
     ['SEC — shelf / S-3 filings',             d.secUrl]
   ];
   linksDiv.innerHTML = links.map(function(l) {
-    return '<a href="' + l[1] + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">↗ ' + l[0] + '</a>';
+    return '<a href="' + l[1] + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">&#8599; ' + l[0] + '</a>';
   }).join('');
   document.getElementById('sc-dilution-detail').after(linksDiv);
 
@@ -1038,7 +1038,7 @@ function renderScannerResults(d) {
   if (d.news && d.news.length) {
     newsEl.innerHTML = d.news.map(function(n) {
       return '<div style="padding:9px 0;border-bottom:1px solid var(--border);">' +
-        '<a href="' + n.url + '" target="_blank" style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">' + n.headline + '</a>' +
+        '<a href="' + n.url + '" target="_blank" style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;">' + n.headline + '</a>' +
         '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);">' + (n.source || '') + (n.date ? ' &bull; ' + n.date : '') + '</div>' +
         '</div>';
     }).join('');
