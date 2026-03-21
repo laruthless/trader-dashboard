@@ -187,6 +187,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     <button class="nav-tab active" onclick="goPage('today',this)">Today</button>
     <button class="nav-tab" onclick="goPage('history',this)">History</button>
     <button class="nav-tab" onclick="goPage('analytics',this)">Analytics</button>
+    <button class="nav-tab" onclick="goPage('scanner',this)">Scanner</button>
   </div>
   <div class="nav-right" id="navClock"></div>
 </nav>
@@ -282,6 +283,65 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     <div class="card-title">Trading journal — <span id="jDateLbl" style="color:var(--text3);font-weight:400;"></span></div>
     <textarea class="jta" id="jta" placeholder="Pre-market plan, trade rationale, emotions, lessons learned..." oninput="saveJournal()"></textarea>
     <div class="j-saved" id="jStatus"></div>
+  </div>
+</div>
+
+<!-- SCANNER -->
+<div class="page" id="page-scanner">
+  <div class="hdr">
+    <div><div class="hdr-lbl">Research</div><div class="hdr-date">Stock scanner</div></div>
+  </div>
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Symbol lookup</div>
+    <div style="display:flex;gap:10px;">
+      <input id="scannerInput" type="text" placeholder="Enter ticker (e.g. NVDA)" autocomplete="off"
+        style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:10px 14px;font-family:var(--mono);font-size:18px;color:var(--text);outline:none;text-transform:uppercase;"
+        onkeydown="if(event.key==='Enter')runScanner()"
+        oninput="this.value=this.value.toUpperCase()"/>
+      <button onclick="runScanner()"
+        style="background:transparent;border:1px solid var(--border2);border-radius:var(--r);padding:10px 20px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--text2);cursor:pointer;white-space:nowrap;transition:all 0.15s;"
+        onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+        onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">
+        SCAN
+      </button>
+    </div>
+    <div id="scannerStatus" style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-top:8px;min-height:14px;"></div>
+  </div>
+  <div id="scannerResults" style="display:none;">
+    <div class="card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-family:var(--mono);font-size:28px;font-weight:600;color:var(--text);" id="sc-symbol"></div>
+          <div style="font-family:var(--sans);font-size:14px;color:var(--text2);margin-top:3px;" id="sc-name"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            <span id="sc-industry-badge" style="font-family:var(--mono);font-size:10px;background:var(--blue-dim);color:var(--blue);border:1px solid #4a9eff25;border-radius:3px;padding:3px 8px;"></span>
+            <span id="sc-country-badge" style="font-family:var(--mono);font-size:10px;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);border-radius:3px;padding:3px 8px;"></span>
+            <span id="sc-ipo-badge" style="font-family:var(--mono);font-size:10px;background:var(--surface2);color:var(--text3);border:1px solid var(--border2);border-radius:3px;padding:3px 8px;"></span>
+          </div>
+        </div>
+        <div id="sc-dilution-badge" style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      <div class="stat"><div class="stat-lbl">Float</div><div class="stat-val" id="sc-float">—</div></div>
+      <div class="stat"><div class="stat-lbl">Market cap</div><div class="stat-val" id="sc-mktcap">—</div></div>
+      <div class="stat"><div class="stat-lbl">Avg volume</div><div class="stat-val" id="sc-vol">—</div></div>
+      <div class="stat"><div class="stat-lbl">Short interest</div><div class="stat-val" id="sc-short">—</div></div>
+      <div class="stat"><div class="stat-lbl">ATR (14d)</div><div class="stat-val" id="sc-atr">—</div></div>
+      <div class="stat"><div class="stat-lbl">Shelf offerings</div><div class="stat-val" id="sc-shelf">—</div></div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">Dilution analysis</div>
+      <div id="sc-dilution-detail" style="font-size:13px;color:var(--text2);line-height:1.7;"></div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">Upgrades &amp; downgrades — last 12 months</div>
+      <div id="sc-ratings"></div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">Recent news</div>
+      <div id="sc-news"></div>
+    </div>
   </div>
 </div>
 
@@ -665,8 +725,6 @@ function renderCSVResults(tradelist,filename){
   });
 
   // Summary row
-  const totalPnl=closed.reduce((s,t)=>s+t.pnl,0);
-  const wins=closed.filter(t=>t.pnl>0).length;
   const summary=document.createElement('div');
   summary.style.cssText='font-family:var(--mono);font-size:11px;color:var(--text3);padding:8px 0 4px;display:flex;justify-content:space-between;';
   summary.innerHTML=`<span>${closed.length} closed trades &bull; ${wins}W / ${closed.length-wins}L &bull; ${closed.length?Math.round(wins/closed.length*100):0}% win rate</span><span class="${cls(totalPnl)}">${fmt(totalPnl)}</span>`;
@@ -786,6 +844,177 @@ function renderAnalytics(){
   const se=document.getElementById('an-streak');se.textContent=cur+' '+(curDir||'');se.className='stat-val '+(curDir==='win'?'pos':'neg');
   document.getElementById('an-bstreak').textContent=bW?bW+' wins':'—';
   document.getElementById('an-wstreak').textContent=wL?wL+' losses':'—';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── STOCK SCANNER ─────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+
+function setScanStatus(msg, color){
+  const el = document.getElementById('scannerStatus');
+  el.textContent = msg;
+  el.style.color = color || 'var(--text3)';
+}
+
+function fmtNum(n){
+  if(n == null || n === '' || n === 'N/A') return '—';
+  const num = parseFloat(String(n).replace(/[^0-9.]/g,''));
+  if(isNaN(num)) return String(n);
+  if(num >= 1e9) return '$' + (num/1e9).toFixed(2) + 'B';
+  if(num >= 1e6) return '$' + (num/1e6).toFixed(2) + 'M';
+  if(num >= 1e3) return '$' + (num/1e3).toFixed(0) + 'K';
+  return String(n);
+}
+
+function fmtShares(n){
+  if(n == null || n === '' || n === 'N/A') return '—';
+  const num = parseFloat(String(n).replace(/[^0-9.]/g,''));
+  if(isNaN(num)) return String(n);
+  if(num >= 1e9) return (num/1e9).toFixed(2) + 'B';
+  if(num >= 1e6) return (num/1e6).toFixed(2) + 'M';
+  if(num >= 1e3) return (num/1e3).toFixed(0) + 'K';
+  return String(n);
+}
+
+async function runScanner(){
+  const sym = document.getElementById('scannerInput').value.trim().toUpperCase();
+  if(!sym){ setScanStatus('Enter a ticker symbol.','var(--red)'); return; }
+
+  document.getElementById('scannerResults').style.display = 'none';
+  setScanStatus('Scanning ' + sym + ' ...', 'var(--amber)');
+
+  const prompt = `You are a stock research assistant. Search the web thoroughly and return ONLY a raw JSON object (no markdown, no backticks, no explanation) for the stock ticker ${sym} with these exact fields:
+
+{
+  "symbol": "${sym}",
+  "companyName": "Full company name",
+  "industry": "Industry sector",
+  "country": "Country of incorporation",
+  "ipoYear": "Year of IPO or 'N/A'",
+  "float": "Shares float as number (e.g. 5200000 for 5.2M)",
+  "marketCap": "Market cap as number in dollars",
+  "avgVolume": "30-day average daily volume as number",
+  "shortInterest": "Short interest as percentage string (e.g. '12.4%') or shares",
+  "atr": "14-day ATR in dollars (e.g. '2.45')",
+  "shelfOfferings": "Active shelf offering amount or 'None active' or 'Unknown'",
+  "dilutionDanger": "LOW or MEDIUM or HIGH",
+  "dilutionDetail": "2-3 sentences explaining dilution risk: float size, shelf status, recent ATM offerings, warrant overhang, etc.",
+  "ratingsLastYear": [
+    {"date":"YYYY-MM-DD","firm":"Firm name","action":"Upgraded/Downgraded/Initiated/Reiterated","from":"prior rating or null","to":"new rating","priceTarget":"$XX or null"}
+  ],
+  "newsArticles": [
+    {"headline":"Article headline","source":"Source name","url":"https://full-url","date":"YYYY-MM-DD"}
+  ]
+}
+
+Search for: ${sym} stock float short interest shelf offering dilution, ${sym} analyst upgrades downgrades 2024 2025, ${sym} news today. Return at least 3 news articles and all ratings actions from the last 12 months. Be accurate - use real current data from your search results.`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    let parsed = null;
+    for(const b of data.content){
+      if(b.type === 'text'){
+        try{
+          const clean = b.text.replace(/```json|```/g,'').trim();
+          parsed = JSON.parse(clean);
+          break;
+        } catch(e){}
+      }
+    }
+
+    if(!parsed) throw new Error('Could not parse response');
+    renderScannerResults(parsed);
+    setScanStatus('', '');
+
+  } catch(err){
+    setScanStatus('Scan failed: ' + err.message, 'var(--red)');
+  }
+}
+
+function renderScannerResults(d){
+  // Header
+  document.getElementById('sc-symbol').textContent = d.symbol || '—';
+  document.getElementById('sc-name').textContent = d.companyName || '';
+  document.getElementById('sc-industry-badge').textContent = d.industry || '';
+  document.getElementById('sc-country-badge').textContent = d.country || '';
+  document.getElementById('sc-ipo-badge').textContent = d.ipoYear ? 'IPO ' + d.ipoYear : '';
+
+  // Dilution badge
+  const danger = (d.dilutionDanger || '').toUpperCase();
+  const db = document.getElementById('sc-dilution-badge');
+  if(danger === 'HIGH'){
+    db.textContent = 'DILUTION DANGER HIGH';
+    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--red-dim);color:var(--red);border:1px solid var(--red-mid);';
+  } else if(danger === 'MEDIUM'){
+    db.textContent = 'DILUTION DANGER MEDIUM';
+    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--amber-dim);color:var(--amber);border:1px solid #f5a62335;';
+  } else if(danger === 'LOW'){
+    db.textContent = 'DILUTION DANGER LOW';
+    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--green-dim);color:var(--green);border:1px solid var(--green-mid);';
+  } else {
+    db.textContent = '';
+  }
+
+  // Key stats
+  document.getElementById('sc-float').textContent = d.float ? fmtShares(d.float) : '—';
+  document.getElementById('sc-mktcap').textContent = d.marketCap ? fmtNum(d.marketCap) : '—';
+  document.getElementById('sc-vol').textContent = d.avgVolume ? fmtShares(d.avgVolume) : '—';
+  document.getElementById('sc-short').textContent = d.shortInterest || '—';
+  document.getElementById('sc-atr').textContent = d.atr ? '$' + d.atr : '—';
+  document.getElementById('sc-shelf').textContent = d.shelfOfferings || '—';
+
+  // Dilution detail
+  document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail || '—';
+
+  // Ratings
+  const ratingsEl = document.getElementById('sc-ratings');
+  if(d.ratingsLastYear && d.ratingsLastYear.length){
+    let html = '';
+    d.ratingsLastYear.forEach(r => {
+      const isUp = (r.action||'').toLowerCase().includes('upgrad');
+      const isDown = (r.action||'').toLowerCase().includes('downgrad');
+      const acColor = isUp ? 'var(--green)' : isDown ? 'var(--red)' : 'var(--text2)';
+      const pt = r.priceTarget ? ` <span style="color:var(--amber)">PT ${r.priceTarget}</span>` : '';
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:4px;">
+        <span style="color:var(--text3);min-width:90px;">${r.date || ''}</span>
+        <span style="color:var(--text);font-weight:500;flex:1;min-width:120px;">${r.firm || ''}</span>
+        <span style="color:${acColor};font-weight:600;">${r.action || ''}${r.from&&r.to?' — '+r.from+' → '+r.to:r.to?' → '+r.to:''}${pt}</span>
+      </div>`;
+    });
+    ratingsEl.innerHTML = html || '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No ratings actions found in the last 12 months.</div>';
+  } else {
+    ratingsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No ratings actions found in the last 12 months.</div>';
+  }
+
+  // News
+  const newsEl = document.getElementById('sc-news');
+  if(d.newsArticles && d.newsArticles.length){
+    let html = '';
+    d.newsArticles.forEach(n => {
+      const url = n.url || '#';
+      html += `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <a href="${url}" target="_blank" style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:4px;" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">${n.headline || ''}</a>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${n.source || ''}${n.date?' &bull; '+n.date:''}</div>
+      </div>`;
+    });
+    newsEl.innerHTML = html;
+  } else {
+    newsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No news articles found.</div>';
+  }
+
+  document.getElementById('scannerResults').style.display = 'block';
+  document.getElementById('scannerResults').scrollIntoView({behavior:'smooth', block:'start'});
 }
 </script>
 </body>
