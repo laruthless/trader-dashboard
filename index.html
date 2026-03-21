@@ -850,10 +850,8 @@ function renderAnalytics(){
 // ── STOCK SCANNER ─────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
 
-// ── Worker URL (your Cloudflare proxy) ───────────────────────────────
 const WORKER_URL = 'https://trader-proxy.mattrlarue.workers.dev';
 
-// ── Helpers ───────────────────────────────────────────────────────────
 function setScanStatus(msg, color){
   const el = document.getElementById('scannerStatus');
   el.textContent = msg;
@@ -875,7 +873,6 @@ function fmtShares(n){
   return n.toLocaleString();
 }
 
-// ── Main scanner ──────────────────────────────────────────────────────
 async function runScanner(){
   const sym = document.getElementById('scannerInput').value.trim().toUpperCase();
   if(!sym){ setScanStatus('Enter a ticker symbol.','var(--red)'); return; }
@@ -885,98 +882,70 @@ async function runScanner(){
 
   try{
     const res = await fetch(WORKER_URL + '?symbol=' + sym);
-    if(!res.ok){
-      const err = await res.json().catch(()=>({}));
-      throw new Error(err.error || 'HTTP '+res.status);
-    }
-    const d = await res.json();
+    const d   = await res.json();
 
-    if(!d.profile || !d.profile.name){
-      setScanStatus('Symbol not found: '+sym,'var(--red)'); return;
-    }
+    if(d.error){ setScanStatus(d.error,'var(--red)'); return; }
+    if(!d.profile || !d.profile.name){ setScanStatus('Symbol not found: '+sym,'var(--red)'); return; }
 
-    const m   = d.metrics || {};
+    const p   = d.profile;
+    const q   = d.quote   || {};
     const atr = d.atr;
 
-    // ── Market cap ────────────────────────────────────────────────
-    const mktCap = d.profile.marketCapitalization
-      ? d.profile.marketCapitalization * 1e6
-      : null;
+    // Market cap from profile (in millions) or quote * shares
+    const mktCap      = p.marketCapitalization ? p.marketCapitalization * 1e6 : null;
+    const sharesOut   = p.shareOutstanding      ? p.shareOutstanding * 1e6    : null;
+    const price       = q.c || null;
+    const ipoYear     = p.ipo ? p.ipo.slice(0,4) : '—';
 
-    // ── Avg volume ────────────────────────────────────────────────
-    const avgVol = m['10DayAverageTradingVolume']
-      ? m['10DayAverageTradingVolume'] * 1e6
-      : null;
-
-    // ── Short interest ────────────────────────────────────────────
-    const shortPct   = m['shortInterest']          || null;
-    const shortRatio = m['shortRatio']             || null;
-
-    // ── IPO year ──────────────────────────────────────────────────
-    const ipoYear = d.profile.ipo ? d.profile.ipo.slice(0,4) : '—';
-
-    // ── Dilution danger ───────────────────────────────────────────
-    // Use 52-week range & market cap as proxies when float not available
-    const sharesOut = d.profile.shareOutstanding || null;
-    const price     = d.quote.c || null;
-    const floatNum  = sharesOut ? sharesOut * 1e6 : null;
-    const floatM    = floatNum  ? floatNum / 1e6  : null;
-
+    // Dilution — based on shares outstanding since float not on free tier
+    const sharesM = sharesOut ? sharesOut/1e6 : null;
     let dilutionDanger = 'UNKNOWN';
-    if(floatM !== null){
-      if(floatM < 5   || (shortPct && shortPct > 30)) dilutionDanger = 'HIGH';
-      else if(floatM < 20 || (shortPct && shortPct > 15)) dilutionDanger = 'MEDIUM';
-      else dilutionDanger = 'LOW';
-    }
-
     let dilutionDetail = '';
-    if(sharesOut) dilutionDetail += 'Shares outstanding: '+fmtShares(sharesOut*1e6)+'. ';
-    if(shortPct)  dilutionDetail += 'Short interest: '+shortPct.toFixed(1)+'%'+
-                                    (shortRatio?' ('+shortRatio.toFixed(1)+'d to cover)':'')+'. ';
-    if(dilutionDanger !== 'UNKNOWN')
-      dilutionDetail += 'Dilution danger rated '+dilutionDanger+'. ';
+    if(sharesM !== null){
+      if(sharesM < 10)       dilutionDanger = 'HIGH';
+      else if(sharesM < 50)  dilutionDanger = 'MEDIUM';
+      else                   dilutionDanger = 'LOW';
+      dilutionDetail = 'Shares outstanding: '+fmtShares(sharesOut)+'. ';
+    }
+    dilutionDetail += 'Float and short interest require a Finnhub premium plan — see Finviz link below for those figures. ';
     dilutionDetail += 'For active shelf/S-3 filings see the SEC EDGAR link below.';
 
-    // ── Analyst ratings (last 12 months) ─────────────────────────
+    // Ratings
     const ratings = (d.upgrades||[])
       .sort((a,b)=>new Date(b.gradeDate)-new Date(a.gradeDate))
       .slice(0,15)
-      .map(u=>({date:u.gradeDate, firm:u.company, action:u.action, from:u.fromGrade, to:u.toGrade}));
+      .map(u=>({date:u.gradeDate,firm:u.company,action:u.action,from:u.fromGrade,to:u.toGrade}));
 
-    // ── News ──────────────────────────────────────────────────────
+    // News
     const newsItems = (d.news||[]).map(n=>({
-      headline: n.headline,
-      url:      n.url,
-      source:   n.source,
-      date:     n.datetime ? new Date(n.datetime*1000).toISOString().slice(0,10) : ''
+      headline: n.headline, url: n.url, source: n.source,
+      date: n.datetime ? new Date(n.datetime*1000).toISOString().slice(0,10) : ''
     }));
 
-    const now365 = new Date(Date.now()-365*86400000).toISOString().slice(0,10);
-    const today  = new Date().toISOString().slice(0,10);
+    const today   = new Date().toISOString().slice(0,10);
+    const yr365   = new Date(Date.now()-365*86400000).toISOString().slice(0,10);
 
     setScanStatus('','');
     renderScannerResults({
       symbol:        sym,
-      companyName:   d.profile.name,
-      industry:      d.profile.finnhubIndustry || '—',
+      companyName:   p.name,
+      industry:      p.finnhubIndustry || '—',
       sector:        '—',
-      country:       d.profile.country         || '—',
+      country:       p.country  || '—',
       ipoYear,
-      float:         floatNum ? fmtShares(floatNum) : '—',
-      marketCap:     mktCap   ? fmtBig(mktCap)      : '—',
-      avgVolume:     avgVol   ? fmtShares(avgVol)    : '—',
-      shortInterest: shortPct
-        ? shortPct.toFixed(1)+'%'+(shortRatio?' / '+shortRatio.toFixed(1)+'d cover':'')
-        : '—',
-      atr:   atr  ? '$'+atr.toFixed(4) : '—',
-      shelf: 'See SEC EDGAR link below',
+      float:         '— (see Finviz)',
+      marketCap:     mktCap    ? fmtBig(mktCap)     : '—',
+      avgVolume:     '— (see Finviz)',
+      shortInterest: '— (see Finviz)',
+      atr:           atr       ? '$'+atr.toFixed(4)  : '—',
+      shelf:         'See SEC EDGAR link below',
       dilutionDanger,
       dilutionDetail,
       ratings,
-      news: newsItems,
+      news:          newsItems,
       finvizUrl: 'https://finviz.com/quote.ashx?t='+sym,
       yahooUrl:  'https://finance.yahoo.com/quote/'+sym,
-      secUrl:    'https://efts.sec.gov/LATEST/search-index?q=%22'+sym+'%22&forms=S-3,424B&dateRange=custom&startdt='+now365+'&enddt='+today
+      secUrl:    'https://efts.sec.gov/LATEST/search-index?q=%22'+sym+'%22&forms=S-3,424B&dateRange=custom&startdt='+yr365+'&enddt='+today
     });
 
   }catch(err){
@@ -985,7 +954,6 @@ async function runScanner(){
   }
 }
 
-// ── Render results ────────────────────────────────────────────────────
 function renderScannerResults(d){
   document.getElementById('sc-symbol').textContent = d.symbol||'—';
   document.getElementById('sc-name').textContent   = d.companyName||'';
@@ -997,7 +965,6 @@ function renderScannerResults(d){
   document.getElementById('sc-ipo-badge').textContent =
     (d.ipoYear&&d.ipoYear!=='—') ? 'IPO '+d.ipoYear : '';
 
-  // Dilution badge
   const danger = (d.dilutionDanger||'UNKNOWN').toUpperCase();
   const db = document.getElementById('sc-dilution-badge');
   const styles = {
@@ -1009,7 +976,6 @@ function renderScannerResults(d){
   db.textContent = 'DILUTION: '+(danger==='UNKNOWN'?'N/A':danger);
   db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);'+(styles[danger]||styles.UNKNOWN);
 
-  // Stats
   document.getElementById('sc-float').textContent   = d.float;
   document.getElementById('sc-mktcap').textContent  = d.marketCap;
   document.getElementById('sc-vol').textContent     = d.avgVolume;
@@ -1017,7 +983,6 @@ function renderScannerResults(d){
   document.getElementById('sc-atr').textContent     = d.atr;
   document.getElementById('sc-shelf').textContent   = d.shelf;
 
-  // Dilution detail + source links
   document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail||'—';
   const old = document.getElementById('sc-source-links');
   if(old) old.remove();
@@ -1025,8 +990,8 @@ function renderScannerResults(d){
   linksDiv.id = 'sc-source-links';
   linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;';
   linksDiv.innerHTML = [
-    ['Finviz',            d.finvizUrl],
-    ['Yahoo Finance',     d.yahooUrl],
+    ['Finviz (float, short interest, volume)',d.finvizUrl],
+    ['Yahoo Finance', d.yahooUrl],
     ['SEC Shelf Filings', d.secUrl]
   ].map(([lbl,url])=>
     `<a href="${url}" target="_blank"
@@ -1036,7 +1001,6 @@ function renderScannerResults(d){
   ).join('');
   document.getElementById('sc-dilution-detail').after(linksDiv);
 
-  // Ratings
   const ratingsEl = document.getElementById('sc-ratings');
   if(d.ratings && d.ratings.length){
     ratingsEl.innerHTML = d.ratings.map(r=>{
@@ -1044,7 +1008,7 @@ function renderScannerResults(d){
       const isUp = act.includes('up')||act.includes('init')||act.includes('reit')||act.includes('main');
       const isDn = act.includes('down');
       const col  = isUp?'var(--green)':isDn?'var(--red)':'var(--text2)';
-      const chg  = r.from&&r.to ? r.from+' → '+r.to : r.to||r.from||'';
+      const chg  = r.from&&r.to?r.from+' → '+r.to:r.to||r.from||'';
       return `<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">
         <span style="color:var(--text3);min-width:90px;">${r.date}</span>
         <span style="color:var(--text);flex:1;min-width:120px;">${r.firm}</span>
@@ -1058,7 +1022,6 @@ function renderScannerResults(d){
     </div>`;
   }
 
-  // News
   const newsEl = document.getElementById('sc-news');
   if(d.news && d.news.length){
     newsEl.innerHTML = d.news.map(n=>
@@ -1075,7 +1038,7 @@ function renderScannerResults(d){
   } else {
     newsEl.innerHTML = `<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">
       No recent news found.
-      <a href="${d.yahooUrl}/news" target="_blank" style="color:var(--blue);">Yahoo Finance news ↗</a>
+      <a href="${d.yahooUrl}/news" target="_blank" style="color:var(--blue);">Yahoo Finance ↗</a>
     </div>`;
   }
 
