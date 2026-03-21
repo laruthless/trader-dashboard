@@ -787,7 +787,7 @@ function renderHistPage(){
     const dt=new Date(d+'T12:00:00');
     const row=document.createElement('div');row.className='day-row';
     const tag=v.fromCSV?'<span style="font-family:var(--mono);font-size:9px;background:var(--blue-dim);color:var(--blue);border-radius:2px;padding:2px 5px;margin-left:6px;">DAS</span>':'';
-    row.innerHTML=`<div><div class="dr-date">${dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}${tag}</div><div class="dr-meta">${v.count||0} trade${(v.count||0)===1?'':'s'}</div></div><div style="display:flex;align-items:center;gap:10px;"><span class="dr-pnl ${cls(v.pnl)}">${fmt(v.pnl)}</span><span class="dr-arr">›</span></div>`;
+    row.innerHTML=`<div><div class="dr-date">${dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}${tag}</div><div class="dr-meta">${v.count||0} trade${(v.count||0)===1?'':'s'}</div></div><div style="display:flex;align-items:center;gap:8px;"><span class="dr-pnl ${cls(v.pnl)}">${fmt(v.pnl)}</span><button onclick="event.stopPropagation();showEditPanel('${d}')" style="font-family:var(--mono);font-size:10px;padding:4px 10px;background:transparent;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);cursor:pointer;" onmouseover="this.style.borderColor='var(--amber)';this.style.color='var(--amber)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text3)'">edit</button><span class="dr-arr">›</span></div>`;
     row.onclick=()=>showDetail(d,row);list.appendChild(row);
   });
 }
@@ -814,6 +814,139 @@ function showDetail(dateKey,rowEl){
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'start'}),50);
 }
 function closeDetail(){document.getElementById('detailPanel').style.display='none';document.querySelectorAll('.day-row').forEach(r=>r.classList.remove('selected'));}
+
+function showEditPanel(dateKey){
+  closeDetail();
+  const dt=new Date(dateKey+'T12:00:00');
+  const dateLabel=dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  const h=getHist();
+  const v=h[dateKey]||{pnl:0,count:0};
+
+  // Remove any existing edit panel
+  const existing=document.getElementById('editPanel');
+  if(existing)existing.remove();
+
+  const panel=document.createElement('div');
+  panel.id='editPanel';
+  panel.style.cssText='background:var(--surface);border:1px solid var(--amber);border-radius:var(--rl);padding:20px;margin-top:8px;';
+  panel.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border);">
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.15em;color:var(--amber);margin-bottom:4px;">EDITING</div>
+        <div style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--text);">${dateLabel}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-top:3px;">Current: ${fmt(v.pnl)} &bull; ${v.count||0} trades</div>
+      </div>
+      <span onclick="closeEditPanel()" style="font-family:var(--mono);font-size:11px;color:var(--text3);cursor:pointer;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'">✕ Close</span>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:0.15em;color:var(--text3);text-transform:uppercase;margin-bottom:10px;">Option 1 — Upload DAS CSV for this date</div>
+      <div style="border:1px dashed var(--border2);border-radius:var(--rl);padding:16px;text-align:center;position:relative;cursor:pointer;" id="editDropZone"
+           ondragover="event.preventDefault();this.style.borderColor='var(--blue)'"
+           ondragleave="this.style.borderColor='var(--border2)'"
+           ondrop="handleEditDrop(event,'${dateKey}')">
+        <input type="file" accept=".csv" onchange="handleEditFileInput(event,'${dateKey}')" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text2);">↑ Drop CSV or click to browse</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:4px;">Will replace all trade data for ${dateLabel}</div>
+      </div>
+      <div id="editUploadStatus" style="font-family:var(--mono);font-size:11px;margin-top:8px;min-height:14px;"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:0.15em;color:var(--text3);text-transform:uppercase;margin-bottom:10px;">Option 2 — Manual P&L override</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px;">
+        <input type="number" id="editPnl" placeholder="Net P&L ($)" value="${v.pnl.toFixed(2)}"
+          style="background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--mono);font-size:13px;color:var(--text);outline:none;" />
+        <input type="number" id="editCount" placeholder="# trades" value="${v.count||0}"
+          style="background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--mono);font-size:13px;color:var(--text);outline:none;" />
+        <button onclick="applyManualEdit('${dateKey}')"
+          style="background:transparent;border:1px solid var(--border2);border-radius:var(--r);padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;"
+          onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+          onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">Save</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">Enter the corrected net P&L and trade count for this day.</div>
+    </div>`;
+
+  // Insert after the day row that was clicked
+  const list=document.getElementById('histList');
+  // Find the row for this date and insert after it
+  const rows=list.querySelectorAll('.day-row');
+  let inserted=false;
+  rows.forEach(row=>{
+    if(row.innerHTML.includes(dateLabel)){
+      row.after(panel);
+      inserted=true;
+    }
+  });
+  if(!inserted) list.appendChild(panel);
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function closeEditPanel(){
+  const p=document.getElementById('editPanel');
+  if(p)p.remove();
+}
+
+function handleEditDrop(e,dateKey){
+  e.preventDefault();
+  document.getElementById('editDropZone').style.borderColor='var(--border2)';
+  const file=e.dataTransfer.files[0];
+  if(file)processEditCSV(file,dateKey);
+}
+function handleEditFileInput(e,dateKey){
+  const file=e.target.files[0];
+  if(file)processEditCSV(file,dateKey);
+}
+
+function processEditCSV(file,dateKey){
+  if(!file.name.toLowerCase().endsWith('.csv')){
+    document.getElementById('editUploadStatus').textContent='Not a CSV file.';
+    document.getElementById('editUploadStatus').style.color='var(--red)';
+    return;
+  }
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const rows=parseCSV(e.target.result);
+      const tradelist=calcGoFlatTrades(rows);
+      const closed=tradelist.filter(t=>!t.isOpen);
+      const totalPnl=closed.reduce((s,t)=>s+t.pnl,0);
+      const tradeSum=tradelist.map(t=>({sym:t.sym,pnl:t.pnl,execs:t.executions.length,isOpen:!!t.isOpen}));
+
+      // Save to history under the specified date key
+      const h=getHist();
+      h[dateKey]={pnl:totalPnl,count:closed.length,trades:[],tradeDetails:tradeSum,fromCSV:true};
+      setHist(h);
+
+      // Save the full CSV data for that date
+      localStorage.setItem('csv_'+dateKey,JSON.stringify(tradelist));
+
+      const statusEl=document.getElementById('editUploadStatus');
+      statusEl.textContent='✓ Updated — '+closed.length+' trades, '+fmt(totalPnl)+' net P&L';
+      statusEl.style.color='var(--green)';
+
+      // Refresh history page after short delay
+      setTimeout(()=>{closeEditPanel();renderHistPage();},1200);
+    }catch(err){
+      const statusEl=document.getElementById('editUploadStatus');
+      statusEl.textContent='Error: '+err.message;
+      statusEl.style.color='var(--red)';
+    }
+  };
+  reader.readAsText(file);
+}
+
+function applyManualEdit(dateKey){
+  const pnl=parseFloat(document.getElementById('editPnl').value);
+  const count=parseInt(document.getElementById('editCount').value)||0;
+  if(isNaN(pnl)){alert('Enter a valid P&L number.');return;}
+  const h=getHist();
+  const existing=h[dateKey]||{};
+  h[dateKey]={...existing,pnl,count,fromCSV:false};
+  setHist(h);
+  closeEditPanel();
+  renderHistPage();
+}
 
 // ── ANALYTICS ─────────────────────────────────────────────────────────
 let chartInst=null;
