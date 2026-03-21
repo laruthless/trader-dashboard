@@ -857,23 +857,155 @@ function setScanStatus(msg, color){
 }
 
 function fmtNum(n){
-  if(n == null || n === '' || n === 'N/A') return '—';
-  const num = parseFloat(String(n).replace(/[^0-9.]/g,''));
+  if(n==null||n===''||n==='N/A'||n==='—') return '—';
+  const s = String(n).replace(/[$,]/g,'');
+  const num = parseFloat(s);
   if(isNaN(num)) return String(n);
-  if(num >= 1e9) return '$' + (num/1e9).toFixed(2) + 'B';
-  if(num >= 1e6) return '$' + (num/1e6).toFixed(2) + 'M';
-  if(num >= 1e3) return '$' + (num/1e3).toFixed(0) + 'K';
-  return String(n);
+  if(num>=1e12) return '$'+(num/1e12).toFixed(2)+'T';
+  if(num>=1e9)  return '$'+(num/1e9).toFixed(2)+'B';
+  if(num>=1e6)  return '$'+(num/1e6).toFixed(2)+'M';
+  if(num>=1e3)  return '$'+(num/1e3).toFixed(2)+'K';
+  return '$'+num.toFixed(2);
 }
 
 function fmtShares(n){
-  if(n == null || n === '' || n === 'N/A') return '—';
-  const num = parseFloat(String(n).replace(/[^0-9.]/g,''));
+  if(n==null||n===''||n==='N/A'||n==='—') return '—';
+  const s = String(n).replace(/[,]/g,'');
+  const num = parseFloat(s);
   if(isNaN(num)) return String(n);
-  if(num >= 1e9) return (num/1e9).toFixed(2) + 'B';
-  if(num >= 1e6) return (num/1e6).toFixed(2) + 'M';
-  if(num >= 1e3) return (num/1e3).toFixed(0) + 'K';
+  if(num>=1e9) return (num/1e9).toFixed(2)+'B';
+  if(num>=1e6) return (num/1e6).toFixed(2)+'M';
+  if(num>=1e3) return (num/1e3).toFixed(1)+'K';
   return String(n);
+}
+
+// Proxy helper — uses allorigins to bypass CORS
+async function fetchHTML(url){
+  const proxy = 'https://api.allorigins.win/get?url=' + encodeURIComponent(url);
+  const res = await fetch(proxy);
+  const json = await res.json();
+  return json.contents || '';
+}
+
+function parseFinviz(html, sym){
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const result = {};
+
+  // Finviz snapshot table — cells alternate label/value
+  const cells = doc.querySelectorAll('td.snapshot-td2');
+  const map = {};
+  const allTds = Array.from(doc.querySelectorAll('td.snapshot-td2-cp, td.snapshot-td2'));
+  // Build label->value map from the finviz table rows
+  const rows = doc.querySelectorAll('tr');
+  rows.forEach(row => {
+    const tds = row.querySelectorAll('td');
+    for(let i = 0; i+1 < tds.length; i += 2){
+      const label = (tds[i].textContent||'').trim();
+      const value = (tds[i+1].textContent||'').trim();
+      if(label) map[label] = value;
+    }
+  });
+
+  result.float       = map['Shs Float']   || map['Float']     || '—';
+  result.marketCap   = map['Market Cap']   || '—';
+  result.avgVolume   = map['Avg Volume']   || map['Avg Vol (10 day)'] || '—';
+  result.shortFloat  = map['Short Float']  || map['Short % of Float'] || '—';
+  result.shortRatio  = map['Short Ratio']  || '—';
+  result.atr         = map['ATR']          || '—';
+  result.country     = map['Country']      || '—';
+  result.industry    = map['Industry']     || '—';
+  result.sector      = map['Sector']       || '—';
+  result.ipo         = map['IPO Date']     || '—';
+  result.beta        = map['Beta']         || '—';
+  result.eps         = map['EPS (ttm)']    || '—';
+
+  // Company name from page title or h2
+  const title = doc.querySelector('h2.quote-header_ticker-wrapper-company a') ||
+                doc.querySelector('a#header_ticker') ||
+                doc.querySelector('.quote-header_ticker-wrapper-company');
+  result.companyName = title ? title.textContent.trim() : sym;
+
+  // News from finviz
+  const newsRows = doc.querySelectorAll('tr.nn-tab-link, .news-link-cont a, table#news-table tr');
+  const news = [];
+  newsRows.forEach(row => {
+    const a = row.querySelector('a');
+    if(a && a.href && a.textContent.trim()){
+      news.push({
+        headline: a.textContent.trim(),
+        url: a.href,
+        source: '',
+        date: ''
+      });
+    }
+  });
+  result.news = news.slice(0, 8);
+
+  // Ratings from finviz
+  const ratingRows = doc.querySelectorAll('#ratings-outer tr, .ratings-table tr');
+  const ratings = [];
+  ratingRows.forEach(row => {
+    const tds = row.querySelectorAll('td');
+    if(tds.length >= 4){
+      ratings.push({
+        date:   (tds[0].textContent||'').trim(),
+        action: (tds[1].textContent||'').trim(),
+        firm:   (tds[2].textContent||'').trim(),
+        rating: (tds[3].textContent||'').trim(),
+        pt:     tds[4] ? (tds[4].textContent||'').trim() : ''
+      });
+    }
+  });
+  result.ratings = ratings.slice(0, 15);
+
+  return { map, result };
+}
+
+function parseYahoo(html, sym){
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const result = {};
+
+  // Yahoo Finance uses various data-testid and fin-streamer elements
+  function getByLabel(label){
+    const spans = doc.querySelectorAll('span, td, li');
+    for(const el of spans){
+      if((el.textContent||'').trim() === label){
+        const next = el.nextElementSibling || el.parentElement?.nextElementSibling;
+        if(next) return (next.textContent||'').trim();
+      }
+    }
+    return '—';
+  }
+
+  // Try to grab key stats from JSON embedded in page
+  const scripts = doc.querySelectorAll('script');
+  let rootData = null;
+  scripts.forEach(s => {
+    const txt = s.textContent||'';
+    if(txt.includes('"floatShares"') && !rootData){
+      try{
+        const match = txt.match(/\{.*"floatShares".*\}/s);
+        if(match){
+          // Try to find and parse the quoteType or defaultKeyStatistics block
+          const inner = txt.match(/"defaultKeyStatistics"\s*:\s*(\{[^}]+\})/);
+          if(inner) rootData = JSON.parse(inner[1]);
+        }
+      }catch(e){}
+    }
+  });
+
+  // Shelf / ATM search from text
+  const bodyText = doc.body ? doc.body.textContent : '';
+  result.hasShelf = bodyText.toLowerCase().includes('shelf') || bodyText.toLowerCase().includes('s-3');
+  result.hasATM   = bodyText.toLowerCase().includes('at-the-market') || bodyText.toLowerCase().includes(' atm ') || bodyText.toLowerCase().includes('"atm"');
+
+  result.companyName = sym; // fallback
+  const nameEl = doc.querySelector('h1[class*="title"], h1[data-testid="asset-profile-company-name"]');
+  if(nameEl) result.companyName = nameEl.textContent.trim();
+
+  return result;
 }
 
 async function runScanner(){
@@ -881,141 +1013,191 @@ async function runScanner(){
   if(!sym){ setScanStatus('Enter a ticker symbol.','var(--red)'); return; }
 
   document.getElementById('scannerResults').style.display = 'none';
-  setScanStatus('Scanning ' + sym + ' ...', 'var(--amber)');
+  setScanStatus('Fetching ' + sym + ' from Finviz...', 'var(--amber)');
 
-  const prompt = `You are a stock research assistant. Search the web thoroughly and return ONLY a raw JSON object (no markdown, no backticks, no explanation) for the stock ticker ${sym} with these exact fields:
+  let finvizData = {}, yahooData = {}, finvizMap = {};
 
-{
-  "symbol": "${sym}",
-  "companyName": "Full company name",
-  "industry": "Industry sector",
-  "country": "Country of incorporation",
-  "ipoYear": "Year of IPO or 'N/A'",
-  "float": "Shares float as number (e.g. 5200000 for 5.2M)",
-  "marketCap": "Market cap as number in dollars",
-  "avgVolume": "30-day average daily volume as number",
-  "shortInterest": "Short interest as percentage string (e.g. '12.4%') or shares",
-  "atr": "14-day ATR in dollars (e.g. '2.45')",
-  "shelfOfferings": "Active shelf offering amount or 'None active' or 'Unknown'",
-  "dilutionDanger": "LOW or MEDIUM or HIGH",
-  "dilutionDetail": "2-3 sentences explaining dilution risk: float size, shelf status, recent ATM offerings, warrant overhang, etc.",
-  "ratingsLastYear": [
-    {"date":"YYYY-MM-DD","firm":"Firm name","action":"Upgraded/Downgraded/Initiated/Reiterated","from":"prior rating or null","to":"new rating","priceTarget":"$XX or null"}
-  ],
-  "newsArticles": [
-    {"headline":"Article headline","source":"Source name","url":"https://full-url","date":"YYYY-MM-DD"}
-  ]
-}
-
-Search for: ${sym} stock float short interest shelf offering dilution, ${sym} analyst upgrades downgrades 2024 2025, ${sym} news today. Return at least 3 news articles and all ratings actions from the last 12 months. Be accurate - use real current data from your search results.`;
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    const data = await res.json();
-    let parsed = null;
-    for(const b of data.content){
-      if(b.type === 'text'){
-        try{
-          const clean = b.text.replace(/```json|```/g,'').trim();
-          parsed = JSON.parse(clean);
-          break;
-        } catch(e){}
-      }
+  // 1) Finviz
+  try{
+    const fvHtml = await fetchHTML('https://finviz.com/quote.ashx?t=' + sym + '&p=d');
+    if(fvHtml.includes('No results found') || fvHtml.length < 1000){
+      setScanStatus('Ticker not found on Finviz: ' + sym, 'var(--red)'); return;
     }
-
-    if(!parsed) throw new Error('Could not parse response');
-    renderScannerResults(parsed);
-    setScanStatus('', '');
-
-  } catch(err){
-    setScanStatus('Scan failed: ' + err.message, 'var(--red)');
+    const parsed = parseFinviz(fvHtml, sym);
+    finvizData = parsed.result;
+    finvizMap  = parsed.map;
+  } catch(e){
+    setScanStatus('Finviz fetch failed: ' + e.message, 'var(--red)'); return;
   }
+
+  setScanStatus('Fetching supplemental data from Yahoo Finance...', 'var(--amber)');
+
+  // 2) Yahoo Finance quote page
+  try{
+    const yhHtml = await fetchHTML('https://finance.yahoo.com/quote/' + sym + '/');
+    yahooData = parseYahoo(yhHtml, sym);
+  } catch(e){ /* non-fatal */ }
+
+  // 3) Yahoo Finance statistics page for more detail
+  let yahooStats = {};
+  try{
+    const yhStHtml = await fetchHTML('https://finance.yahoo.com/quote/' + sym + '/key-statistics/');
+    yahooStats = parseYahoo(yhStHtml, sym);
+  } catch(e){ /* non-fatal */ }
+
+  setScanStatus('', '');
+
+  // --- Determine dilution danger ---
+  const floatStr = String(finvizData.float||'').replace(/[^0-9.MBK]/gi,'');
+  let floatNum = 0;
+  if(floatStr.endsWith('M')) floatNum = parseFloat(floatStr)*1e6;
+  else if(floatStr.endsWith('B')) floatNum = parseFloat(floatStr)*1e9;
+  else if(floatStr.endsWith('K')) floatNum = parseFloat(floatStr)*1e3;
+  else floatNum = parseFloat(floatStr)||0;
+
+  const shortFloatPct = parseFloat(String(finvizData.shortFloat||'0').replace('%',''))||0;
+  const hasShelf = finvizData.hasShelf||yahooData.hasShelf||yahooStats.hasShelf||false;
+  const hasATM   = finvizData.hasATM  ||yahooData.hasATM  ||yahooStats.hasATM  ||false;
+
+  let dilutionDanger = 'LOW';
+  let dilutionDetail = '';
+  if(floatNum < 5e6 || shortFloatPct > 30 || hasATM){
+    dilutionDanger = 'HIGH';
+  } else if(floatNum < 20e6 || shortFloatPct > 15 || hasShelf){
+    dilutionDanger = 'MEDIUM';
+  }
+
+  // Build detail text
+  const floatLabel = floatNum > 0 ? fmtShares(floatNum) + ' shares' : finvizData.float;
+  dilutionDetail = `Float: ${floatLabel}. Short interest: ${finvizData.shortFloat}${finvizData.shortRatio&&finvizData.shortRatio!=='—'?' (ratio '+finvizData.shortRatio+')':''}. `;
+  if(hasATM) dilutionDetail += 'Active ATM (at-the-market) offering detected — ongoing dilution risk. ';
+  else if(hasShelf) dilutionDetail += 'Shelf registration (S-3) on file — potential future offering. ';
+  else dilutionDetail += 'No active shelf offering detected. ';
+  dilutionDetail += `Dilution danger rated ${dilutionDanger} based on float size and short interest.`;
+
+  // Parse IPO year
+  let ipoYear = '—';
+  if(finvizData.ipo && finvizData.ipo !== '—'){
+    const m = String(finvizData.ipo).match(/\d{4}/);
+    if(m) ipoYear = m[0];
+  }
+
+  // Build final display object
+  const display = {
+    symbol:        sym,
+    companyName:   finvizData.companyName || yahooData.companyName || sym,
+    industry:      finvizData.industry || '—',
+    sector:        finvizData.sector || '—',
+    country:       finvizData.country || '—',
+    ipoYear,
+    float:         finvizData.float || '—',
+    marketCap:     finvizData.marketCap || '—',
+    avgVolume:     finvizData.avgVolume || '—',
+    shortInterest: finvizData.shortFloat || '—',
+    atr:           finvizData.atr || '—',
+    shelf:         hasATM ? 'ATM active' : hasShelf ? 'Shelf (S-3) on file' : 'None detected',
+    dilutionDanger,
+    dilutionDetail,
+    ratings:       finvizData.ratings || [],
+    news:          finvizData.news || [],
+    finvizUrl:     'https://finviz.com/quote.ashx?t=' + sym,
+    yahooUrl:      'https://finance.yahoo.com/quote/' + sym,
+    allStats:      finvizMap
+  };
+
+  renderScannerResults(display);
 }
 
 function renderScannerResults(d){
-  // Header
   document.getElementById('sc-symbol').textContent = d.symbol || '—';
-  document.getElementById('sc-name').textContent = d.companyName || '';
-  document.getElementById('sc-industry-badge').textContent = d.industry || '';
-  document.getElementById('sc-country-badge').textContent = d.country || '';
-  document.getElementById('sc-ipo-badge').textContent = d.ipoYear ? 'IPO ' + d.ipoYear : '';
+  document.getElementById('sc-name').textContent   = d.companyName || '';
+
+  const indBadge = document.getElementById('sc-industry-badge');
+  indBadge.textContent = [d.sector, d.industry].filter(x=>x&&x!=='—').join(' / ') || '—';
+
+  document.getElementById('sc-country-badge').textContent = d.country && d.country!=='—' ? d.country : '';
+  document.getElementById('sc-ipo-badge').textContent     = d.ipoYear && d.ipoYear!=='—' ? 'IPO ' + d.ipoYear : '';
 
   // Dilution badge
-  const danger = (d.dilutionDanger || '').toUpperCase();
+  const danger = (d.dilutionDanger||'').toUpperCase();
   const db = document.getElementById('sc-dilution-badge');
-  if(danger === 'HIGH'){
-    db.textContent = 'DILUTION DANGER HIGH';
-    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--red-dim);color:var(--red);border:1px solid var(--red-mid);';
-  } else if(danger === 'MEDIUM'){
-    db.textContent = 'DILUTION DANGER MEDIUM';
-    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--amber-dim);color:var(--amber);border:1px solid #f5a62335;';
-  } else if(danger === 'LOW'){
-    db.textContent = 'DILUTION DANGER LOW';
-    db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;padding:8px 14px;border-radius:var(--r);background:var(--green-dim);color:var(--green);border:1px solid var(--green-mid);';
+  if(danger==='HIGH'){
+    db.textContent='DILUTION DANGER: HIGH';
+    db.style.cssText='font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);background:var(--red-dim);color:var(--red);border:1px solid var(--red-mid);';
+  } else if(danger==='MEDIUM'){
+    db.textContent='DILUTION DANGER: MEDIUM';
+    db.style.cssText='font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);background:var(--amber-dim);color:var(--amber);border:1px solid #f5a62335;';
   } else {
-    db.textContent = '';
+    db.textContent='DILUTION DANGER: LOW';
+    db.style.cssText='font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);background:var(--green-dim);color:var(--green);border:1px solid var(--green-mid);';
   }
 
-  // Key stats
-  document.getElementById('sc-float').textContent = d.float ? fmtShares(d.float) : '—';
-  document.getElementById('sc-mktcap').textContent = d.marketCap ? fmtNum(d.marketCap) : '—';
-  document.getElementById('sc-vol').textContent = d.avgVolume ? fmtShares(d.avgVolume) : '—';
-  document.getElementById('sc-short').textContent = d.shortInterest || '—';
-  document.getElementById('sc-atr').textContent = d.atr ? '$' + d.atr : '—';
-  document.getElementById('sc-shelf').textContent = d.shelfOfferings || '—';
+  // Key stats — raw strings from Finviz, no reformatting needed
+  document.getElementById('sc-float').textContent   = d.float;
+  document.getElementById('sc-mktcap').textContent  = d.marketCap;
+  document.getElementById('sc-vol').textContent     = d.avgVolume;
+  document.getElementById('sc-short').textContent   = d.shortInterest;
+  document.getElementById('sc-atr').textContent     = d.atr;
+  document.getElementById('sc-shelf').textContent   = d.shelf;
 
   // Dilution detail
   document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail || '—';
 
+  // Source links
+  const existingLinks = document.getElementById('sc-source-links');
+  if(existingLinks) existingLinks.remove();
+  const linksDiv = document.createElement('div');
+  linksDiv.id = 'sc-source-links';
+  linksDiv.style.cssText = 'margin-top:10px;display:flex;gap:12px;';
+  linksDiv.innerHTML = `
+    <a href="${d.finvizUrl}" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">↗ Finviz</a>
+    <a href="${d.yahooUrl}" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">↗ Yahoo Finance</a>
+  `;
+  document.getElementById('sc-dilution-detail').after(linksDiv);
+
   // Ratings
   const ratingsEl = document.getElementById('sc-ratings');
-  if(d.ratingsLastYear && d.ratingsLastYear.length){
+  if(d.ratings && d.ratings.length){
     let html = '';
-    d.ratingsLastYear.forEach(r => {
-      const isUp = (r.action||'').toLowerCase().includes('upgrad');
-      const isDown = (r.action||'').toLowerCase().includes('downgrad');
-      const acColor = isUp ? 'var(--green)' : isDown ? 'var(--red)' : 'var(--text2)';
-      const pt = r.priceTarget ? ` <span style="color:var(--amber)">PT ${r.priceTarget}</span>` : '';
-      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:4px;">
-        <span style="color:var(--text3);min-width:90px;">${r.date || ''}</span>
-        <span style="color:var(--text);font-weight:500;flex:1;min-width:120px;">${r.firm || ''}</span>
-        <span style="color:${acColor};font-weight:600;">${r.action || ''}${r.from&&r.to?' — '+r.from+' → '+r.to:r.to?' → '+r.to:''}${pt}</span>
+    d.ratings.forEach(r => {
+      const act = (r.action||'').toLowerCase();
+      const isUp   = act.includes('upgrad') || act.includes('initiated') || act.includes('reiterat');
+      const isDown = act.includes('downgrad');
+      const col = isUp ? 'var(--green)' : isDown ? 'var(--red)' : 'var(--text2)';
+      const pt = r.pt && r.pt!=='' ? ` <span style="color:var(--amber)">→ ${r.pt}</span>` : '';
+      html += `<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">
+        <span style="color:var(--text3);min-width:80px;">${r.date}</span>
+        <span style="color:var(--text);flex:1;min-width:110px;">${r.firm}</span>
+        <span style="color:${col};font-weight:600;">${r.action}${r.rating?' — '+r.rating:''}${pt}</span>
       </div>`;
     });
-    ratingsEl.innerHTML = html || '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No ratings actions found in the last 12 months.</div>';
+    ratingsEl.innerHTML = html;
   } else {
-    ratingsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No ratings actions found in the last 12 months.</div>';
+    ratingsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">No ratings data found. <a href="https://finviz.com/quote.ashx?t='+d.symbol+'#analyst" target="_blank" style="color:var(--blue);">Check Finviz directly ↗</a></div>';
   }
 
   // News
   const newsEl = document.getElementById('sc-news');
-  if(d.newsArticles && d.newsArticles.length){
+  if(d.news && d.news.length){
     let html = '';
-    d.newsArticles.forEach(n => {
-      const url = n.url || '#';
-      html += `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
-        <a href="${url}" target="_blank" style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:4px;" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">${n.headline || ''}</a>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${n.source || ''}${n.date?' &bull; '+n.date:''}</div>
+    d.news.forEach(n => {
+      const url = n.url && n.url.startsWith('http') ? n.url : 'https://finviz.com' + n.url;
+      html += `<div style="padding:9px 0;border-bottom:1px solid var(--border);">
+        <a href="${url}" target="_blank"
+          style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;"
+          onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">${n.headline}</a>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${n.source||'Finviz'}${n.date?' &bull; '+n.date:''}</div>
       </div>`;
     });
     newsEl.innerHTML = html;
   } else {
-    newsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;">No news articles found.</div>';
+    newsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">No news found. <a href="https://finviz.com/quote.ashx?t='+d.symbol+'#news" target="_blank" style="color:var(--blue);">Check Finviz directly ↗</a></div>';
   }
 
   document.getElementById('scannerResults').style.display = 'block';
   document.getElementById('scannerResults').scrollIntoView({behavior:'smooth', block:'start'});
 }
+
 </script>
 </body>
 </html>
