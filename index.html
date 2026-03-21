@@ -850,8 +850,8 @@ function renderAnalytics(){
 // ── STOCK SCANNER ─────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
 
-const FKEY = 'd6v8od9r01qig546te80d6v8od9r01qig546te8g';
-const FH   = 'https://finnhub.io/api/v1';
+// ── Worker URL (your Cloudflare proxy) ───────────────────────────────
+const WORKER_URL = 'https://trader-proxy.mattrlarue.workers.dev';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function setScanStatus(msg, color){
@@ -875,213 +875,117 @@ function fmtShares(n){
   return n.toLocaleString();
 }
 
-// ── Finnhub fetch (free endpoints only) ──────────────────────────────
-function fhGet(path){
-  const sep = path.includes('?') ? '&' : '?';
-  return fetch(FH + path + sep + 'token=' + FKEY)
-    .then(r => {
-      if(r.status === 403) throw new Error('403 — endpoint requires premium plan');
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      return r.json();
-    });
-}
-
-// ── Finviz CSV fetch for float + short interest ───────────────────────
-// Finviz screener export is public; use corsproxy.io to handle CORS
-async function fetchFinvizData(sym){
-  // Finviz export: v=152 is the default overview, we only need one ticker
-  const finvizUrl = 'https://finviz.com/export.ashx?v=152&t=' + sym;
-  const proxyUrl  = 'https://corsproxy.io/?' + encodeURIComponent(finvizUrl);
-  try {
-    const res = await fetch(proxyUrl, { headers: { 'x-requested-with': 'XMLHttpRequest' } });
-    if(!res.ok) throw new Error('Finviz HTTP '+res.status);
-    const text = await res.text();
-    // CSV: first row = headers, second row = data
-    const rows = text.trim().split('\n');
-    if(rows.length < 2) return {};
-    const headers = rows[0].split(',').map(h => h.trim().replace(/"/g,''));
-    const values  = rows[1].split(',').map(v => v.trim().replace(/"/g,''));
-    const row = {};
-    headers.forEach((h,i) => row[h] = values[i] || '—');
-    return row;
-  } catch(e) {
-    console.warn('Finviz fetch failed:', e.message);
-    return {};
-  }
-}
-
-// ── Parse Finviz share values like "5.21M", "1.20B" ─────────────────
-function parseFinvizNum(s){
-  if(!s || s === '—' || s === '-') return null;
-  const clean = String(s).replace(/[^0-9.MBKmk]/g,'');
-  const num   = parseFloat(clean);
-  if(isNaN(num)) return null;
-  if(s.toUpperCase().includes('B')) return num * 1e9;
-  if(s.toUpperCase().includes('M')) return num * 1e6;
-  if(s.toUpperCase().includes('K')) return num * 1e3;
-  return num;
-}
-
-// ── ATR (14-day) from candle data ─────────────────────────────────────
-function calcATR14(candles){
-  try {
-    const { h, l, c } = candles;
-    if(!h || h.length < 2) return null;
-    const trs = [];
-    for(let i = 1; i < h.length; i++){
-      if(h[i]==null||l[i]==null||c[i-1]==null) continue;
-      trs.push(Math.max(
-        h[i] - l[i],
-        Math.abs(h[i] - c[i-1]),
-        Math.abs(l[i]  - c[i-1])
-      ));
-    }
-    const last14 = trs.slice(-14);
-    return last14.length ? last14.reduce((s,v)=>s+v,0)/last14.length : null;
-  } catch(e){ return null; }
-}
-
 // ── Main scanner ──────────────────────────────────────────────────────
 async function runScanner(){
   const sym = document.getElementById('scannerInput').value.trim().toUpperCase();
   if(!sym){ setScanStatus('Enter a ticker symbol.','var(--red)'); return; }
 
   document.getElementById('scannerResults').style.display = 'none';
-  setScanStatus('Fetching profile & quote...','var(--amber)');
+  setScanStatus('Scanning '+sym+'...','var(--amber)');
 
-  try {
-    const now     = Math.floor(Date.now()/1000);
-    const from90  = now - 90*24*3600;
-    const from365 = now - 365*24*3600;
-    const dateFmt = ts => new Date(ts*1000).toISOString().slice(0,10);
+  try{
+    const res = await fetch(WORKER_URL + '?symbol=' + sym);
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.error || 'HTTP '+res.status);
+    }
+    const d = await res.json();
 
-    // ── Step 1: Finnhub free endpoints in parallel ────────────────
-    const [profile, quote, metrics, candles, upgrades, news] = await Promise.all([
-      fhGet('/stock/profile2?symbol='+sym),
-      fhGet('/quote?symbol='+sym),
-      fhGet('/stock/metric?symbol='+sym+'&metric=all'),
-      fhGet('/stock/candle?symbol='+sym+'&resolution=D&from='+from90+'&to='+now),
-      fhGet('/stock/upgrade-downgrade?symbol='+sym+'&from='+dateFmt(from365)+'&to='+dateFmt(now)),
-      fhGet('/company-news?symbol='+sym+'&from='+dateFmt(now-30*24*3600)+'&to='+dateFmt(now))
-    ]);
-
-    if(!profile || !profile.name){
-      setScanStatus('Symbol not found: ' + sym,'var(--red)'); return;
+    if(!d.profile || !d.profile.name){
+      setScanStatus('Symbol not found: '+sym,'var(--red)'); return;
     }
 
-    setScanStatus('Fetching float & short interest from Finviz...','var(--amber)');
+    const m   = d.metrics || {};
+    const atr = d.atr;
 
-    // ── Step 2: Finviz for float + short interest ─────────────────
-    const fv = await fetchFinvizData(sym);
+    // ── Market cap ────────────────────────────────────────────────
+    const mktCap = d.profile.marketCapitalization
+      ? d.profile.marketCapitalization * 1e6
+      : null;
 
-    // ── Extract values ────────────────────────────────────────────
-    const m          = metrics.metric || {};
-    const atr        = calcATR14(candles);
-    const mktCap     = profile.marketCapitalization ? profile.marketCapitalization * 1e6 : null;
-    const avgVol10   = m['10DayAverageTradingVolume'] ? m['10DayAverageTradingVolume']*1e6 : null;
+    // ── Avg volume ────────────────────────────────────────────────
+    const avgVol = m['10DayAverageTradingVolume']
+      ? m['10DayAverageTradingVolume'] * 1e6
+      : null;
 
-    // Finviz fields
-    const fvFloat     = fv['Float']         || fv['Shs Float']  || null;
-    const fvShortPct  = fv['Short Float']   || fv['Short % of Float'] || null;
-    const fvShortRatio= fv['Short Ratio']   || null;
-    const fvAvgVol    = fv['Avg Volume']    || null;
-    const fvIPO       = fv['IPO Date']      || null;
-    const fvCountry   = fv['Country']       || null;
-    const fvIndustry  = fv['Industry']      || null;
-    const fvSector    = fv['Sector']        || null;
+    // ── Short interest ────────────────────────────────────────────
+    const shortPct   = m['shortInterest']          || null;
+    const shortRatio = m['shortRatio']             || null;
 
-    // Prefer Finviz for these fields, fall back to Finnhub
-    const floatNum    = parseFinvizNum(fvFloat);
-    const floatStr    = fvFloat && fvFloat !== '—' ? fvFloat : (floatNum ? fmtShares(floatNum) : '—');
-    const avgVolStr   = fvAvgVol && fvAvgVol !== '—' ? fvAvgVol : (avgVol10 ? fmtShares(avgVol10) : '—');
-    const shortStr    = fvShortPct && fvShortPct !== '—'
-      ? fvShortPct + (fvShortRatio && fvShortRatio!=='—' ? ' / '+fvShortRatio+'d cover' : '')
-      : '—';
-
-    // IPO year
-    let ipoYear = '—';
-    if(fvIPO && fvIPO !== '—'){
-      const m = String(fvIPO).match(/\d{4}/);
-      if(m) ipoYear = m[0];
-    } else if(profile.ipo){
-      ipoYear = profile.ipo.slice(0,4);
-    }
-
-    // Industry / country — prefer Finviz, fallback Finnhub
-    const industry = (fvIndustry && fvIndustry!=='—') ? fvIndustry : (profile.finnhubIndustry||'—');
-    const sector   = (fvSector   && fvSector  !=='—') ? fvSector   : '—';
-    const country  = (fvCountry  && fvCountry !=='—') ? fvCountry  : (profile.country||'—');
+    // ── IPO year ──────────────────────────────────────────────────
+    const ipoYear = d.profile.ipo ? d.profile.ipo.slice(0,4) : '—';
 
     // ── Dilution danger ───────────────────────────────────────────
-    const floatM   = floatNum ? floatNum/1e6 : null;
-    const shortPct = fvShortPct ? parseFloat(fvShortPct) : null;
+    // Use 52-week range & market cap as proxies when float not available
+    const sharesOut = d.profile.shareOutstanding || null;
+    const price     = d.quote.c || null;
+    const floatNum  = sharesOut ? sharesOut * 1e6 : null;
+    const floatM    = floatNum  ? floatNum / 1e6  : null;
 
     let dilutionDanger = 'UNKNOWN';
     if(floatM !== null){
-      if     (floatM < 5  || (shortPct && shortPct > 30)) dilutionDanger = 'HIGH';
+      if(floatM < 5   || (shortPct && shortPct > 30)) dilutionDanger = 'HIGH';
       else if(floatM < 20 || (shortPct && shortPct > 15)) dilutionDanger = 'MEDIUM';
-      else                                                  dilutionDanger = 'LOW';
+      else dilutionDanger = 'LOW';
     }
 
     let dilutionDetail = '';
-    if(floatStr !== '—') dilutionDetail += 'Float: ' + floatStr + ' shares. ';
-    if(shortStr !== '—') dilutionDetail += 'Short interest: ' + shortStr + '. ';
-    if(dilutionDanger !== 'UNKNOWN') dilutionDetail += 'Dilution danger rated ' + dilutionDanger + ' based on float size and short interest. ';
-    dilutionDetail += 'For shelf/S-3 offerings, see the SEC EDGAR link below.';
+    if(sharesOut) dilutionDetail += 'Shares outstanding: '+fmtShares(sharesOut*1e6)+'. ';
+    if(shortPct)  dilutionDetail += 'Short interest: '+shortPct.toFixed(1)+'%'+
+                                    (shortRatio?' ('+shortRatio.toFixed(1)+'d to cover)':'')+'. ';
+    if(dilutionDanger !== 'UNKNOWN')
+      dilutionDetail += 'Dilution danger rated '+dilutionDanger+'. ';
+    dilutionDetail += 'For active shelf/S-3 filings see the SEC EDGAR link below.';
 
     // ── Analyst ratings (last 12 months) ─────────────────────────
-    const recentRatings = (upgrades||[])
-      .sort((a,b) => new Date(b.gradeDate) - new Date(a.gradeDate))
+    const ratings = (d.upgrades||[])
+      .sort((a,b)=>new Date(b.gradeDate)-new Date(a.gradeDate))
       .slice(0,15)
-      .map(u => ({
-        date:   u.gradeDate,
-        firm:   u.company,
-        action: u.action,
-        from:   u.fromGrade,
-        to:     u.toGrade
-      }));
+      .map(u=>({date:u.gradeDate, firm:u.company, action:u.action, from:u.fromGrade, to:u.toGrade}));
 
-    // ── News (last 30 days, up to 8) ──────────────────────────────
-    const newsItems = (Array.isArray(news) ? news : [])
-      .slice(0,8)
-      .map(n => ({
-        headline: n.headline,
-        url:      n.url,
-        source:   n.source,
-        date:     n.datetime ? new Date(n.datetime*1000).toISOString().slice(0,10) : ''
-      }));
+    // ── News ──────────────────────────────────────────────────────
+    const newsItems = (d.news||[]).map(n=>({
+      headline: n.headline,
+      url:      n.url,
+      source:   n.source,
+      date:     n.datetime ? new Date(n.datetime*1000).toISOString().slice(0,10) : ''
+    }));
+
+    const now365 = new Date(Date.now()-365*86400000).toISOString().slice(0,10);
+    const today  = new Date().toISOString().slice(0,10);
 
     setScanStatus('','');
-
     renderScannerResults({
       symbol:        sym,
-      companyName:   profile.name,
-      industry,
-      sector,
-      country,
+      companyName:   d.profile.name,
+      industry:      d.profile.finnhubIndustry || '—',
+      sector:        '—',
+      country:       d.profile.country         || '—',
       ipoYear,
-      float:         floatStr,
-      marketCap:     mktCap ? fmtBig(mktCap) : (profile.marketCapitalization ? fmtBig(profile.marketCapitalization*1e6) : '—'),
-      avgVolume:     avgVolStr,
-      shortInterest: shortStr,
-      atr:           atr ? '$'+atr.toFixed(4) : '—',
-      shelf:         'See SEC EDGAR link below',
+      float:         floatNum ? fmtShares(floatNum) : '—',
+      marketCap:     mktCap   ? fmtBig(mktCap)      : '—',
+      avgVolume:     avgVol   ? fmtShares(avgVol)    : '—',
+      shortInterest: shortPct
+        ? shortPct.toFixed(1)+'%'+(shortRatio?' / '+shortRatio.toFixed(1)+'d cover':'')
+        : '—',
+      atr:   atr  ? '$'+atr.toFixed(4) : '—',
+      shelf: 'See SEC EDGAR link below',
       dilutionDanger,
       dilutionDetail,
-      ratings:       recentRatings,
-      news:          newsItems,
-      finvizUrl:     'https://finviz.com/quote.ashx?t='+sym,
-      yahooUrl:      'https://finance.yahoo.com/quote/'+sym,
-      secUrl:        'https://efts.sec.gov/LATEST/search-index?q=%22'+sym+'%22&forms=S-3,424B&dateRange=custom&startdt='+dateFmt(from365)+'&enddt='+dateFmt(now)
+      ratings,
+      news: newsItems,
+      finvizUrl: 'https://finviz.com/quote.ashx?t='+sym,
+      yahooUrl:  'https://finance.yahoo.com/quote/'+sym,
+      secUrl:    'https://efts.sec.gov/LATEST/search-index?q=%22'+sym+'%22&forms=S-3,424B&dateRange=custom&startdt='+now365+'&enddt='+today
     });
 
-  } catch(err){
+  }catch(err){
     setScanStatus('Scan failed: '+err.message,'var(--red)');
     console.error(err);
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────────
+// ── Render results ────────────────────────────────────────────────────
 function renderScannerResults(d){
   document.getElementById('sc-symbol').textContent = d.symbol||'—';
   document.getElementById('sc-name').textContent   = d.companyName||'';
@@ -1094,7 +998,7 @@ function renderScannerResults(d){
     (d.ipoYear&&d.ipoYear!=='—') ? 'IPO '+d.ipoYear : '';
 
   // Dilution badge
-  const danger = d.dilutionDanger.toUpperCase();
+  const danger = (d.dilutionDanger||'UNKNOWN').toUpperCase();
   const db = document.getElementById('sc-dilution-badge');
   const styles = {
     HIGH:    'background:var(--red-dim);color:var(--red);border:1px solid var(--red-mid);',
@@ -1113,7 +1017,7 @@ function renderScannerResults(d){
   document.getElementById('sc-atr').textContent     = d.atr;
   document.getElementById('sc-shelf').textContent   = d.shelf;
 
-  // Dilution detail + links
+  // Dilution detail + source links
   document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail||'—';
   const old = document.getElementById('sc-source-links');
   if(old) old.remove();
@@ -1121,10 +1025,10 @@ function renderScannerResults(d){
   linksDiv.id = 'sc-source-links';
   linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;';
   linksDiv.innerHTML = [
-    ['Finviz',              d.finvizUrl],
-    ['Yahoo Finance',       d.yahooUrl],
-    ['SEC Shelf Filings',   d.secUrl]
-  ].map(([lbl,url]) =>
+    ['Finviz',            d.finvizUrl],
+    ['Yahoo Finance',     d.yahooUrl],
+    ['SEC Shelf Filings', d.secUrl]
+  ].map(([lbl,url])=>
     `<a href="${url}" target="_blank"
        style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;"
        onmouseover="this.style.textDecoration='underline'"
@@ -1135,12 +1039,12 @@ function renderScannerResults(d){
   // Ratings
   const ratingsEl = document.getElementById('sc-ratings');
   if(d.ratings && d.ratings.length){
-    ratingsEl.innerHTML = d.ratings.map(r => {
+    ratingsEl.innerHTML = d.ratings.map(r=>{
       const act  = (r.action||'').toLowerCase();
       const isUp = act.includes('up')||act.includes('init')||act.includes('reit')||act.includes('main');
       const isDn = act.includes('down');
-      const col  = isUp ? 'var(--green)' : isDn ? 'var(--red)' : 'var(--text2)';
-      const chg  = r.from && r.to ? r.from+' → '+r.to : r.to||r.from||'';
+      const col  = isUp?'var(--green)':isDn?'var(--red)':'var(--text2)';
+      const chg  = r.from&&r.to ? r.from+' → '+r.to : r.to||r.from||'';
       return `<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">
         <span style="color:var(--text3);min-width:90px;">${r.date}</span>
         <span style="color:var(--text);flex:1;min-width:120px;">${r.firm}</span>
@@ -1157,7 +1061,7 @@ function renderScannerResults(d){
   // News
   const newsEl = document.getElementById('sc-news');
   if(d.news && d.news.length){
-    newsEl.innerHTML = d.news.map(n =>
+    newsEl.innerHTML = d.news.map(n=>
       `<div style="padding:9px 0;border-bottom:1px solid var(--border);">
         <a href="${n.url}" target="_blank"
           style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;"
