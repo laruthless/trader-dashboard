@@ -850,7 +850,9 @@ function renderAnalytics(){
 // ── STOCK SCANNER ─────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
 
-// ── Helpers ───────────────────────────────────────────────────────────
+const FKEY = 'd6v8kjpr01qig546t370d6v8kjpr01qig546t37g';
+const FH   = 'https://finnhub.io/api/v1';
+
 function setScanStatus(msg, color){
   const el = document.getElementById('scannerStatus');
   el.textContent = msg;
@@ -858,7 +860,7 @@ function setScanStatus(msg, color){
 }
 
 function fmtBig(n){
-  if(n==null||isNaN(n)) return '—';
+  if(n==null||isNaN(n)||n===0) return '—';
   if(n>=1e12) return '$'+(n/1e12).toFixed(2)+'T';
   if(n>=1e9)  return '$'+(n/1e9).toFixed(2)+'B';
   if(n>=1e6)  return '$'+(n/1e6).toFixed(2)+'M';
@@ -866,223 +868,184 @@ function fmtBig(n){
   return '$'+n.toFixed(2);
 }
 function fmtShares(n){
-  if(n==null||isNaN(n)) return '—';
+  if(n==null||isNaN(n)||n===0) return '—';
   if(n>=1e9) return (n/1e9).toFixed(2)+'B';
   if(n>=1e6) return (n/1e6).toFixed(2)+'M';
   if(n>=1e3) return (n/1e3).toFixed(1)+'K';
-  return n.toString();
+  return n.toLocaleString();
 }
-function fmtPct(n){
-  if(n==null||isNaN(n)) return '—';
-  return (n*100).toFixed(2)+'%';
-}
-function raw(obj, key){ return obj && obj[key] && obj[key].raw != null ? obj[key].raw : null; }
-function fmt(obj, key){ return obj && obj[key] && obj[key].fmt ? obj[key].fmt : null; }
-
-// ── Yahoo Finance v10 quoteSummary ────────────────────────────────────
-async function fetchYahoo(sym){
-  const modules = [
-    'summaryDetail',
-    'defaultKeyStatistics',
-    'assetProfile',
-    'upgradeDowngradeHistory',
-    'financialData',
-    'price'
-  ].join(',');
-
-  // Use Yahoo Finance's CORS-enabled query API
-  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}&corsDomain=finance.yahoo.com&formatted=true&crumb=`;
-
-  // Yahoo v8 chart for ATR calculation (14-day OHLC)
-  const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=3mo`;
-
-  // Yahoo news search
-  const newsUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&newsCount=8&enableNavLinks=false&quotesCount=0`;
-
-  const headers = {
-    'Accept': 'application/json',
-    'User-Agent': 'Mozilla/5.0'
-  };
-
-  const [summaryRes, chartRes, newsRes] = await Promise.allSettled([
-    fetch(url, { headers }),
-    fetch(chartUrl, { headers }),
-    fetch(newsUrl, { headers })
-  ]);
-
-  const summaryData = summaryRes.status === 'fulfilled' && summaryRes.value.ok
-    ? await summaryRes.value.json() : null;
-  const chartData = chartRes.status === 'fulfilled' && chartRes.value.ok
-    ? await chartRes.value.json() : null;
-  const newsData = newsRes.status === 'fulfilled' && newsRes.value.ok
-    ? await newsRes.value.json() : null;
-
-  return { summaryData, chartData, newsData };
+function fhGet(path){
+  return fetch(FH + path + (path.includes('?')?'&':'?') + 'token=' + FKEY)
+    .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); });
 }
 
-// ── ATR Calculation (14-day) ──────────────────────────────────────────
-function calcATR(chartData){
+function calcATR14(candles){
   try{
-    const q = chartData.chart.result[0].indicators.quote[0];
-    const highs  = q.high;
-    const lows   = q.low;
-    const closes = q.close;
-    if(!highs||highs.length < 2) return null;
-    const trList = [];
-    for(let i=1; i<highs.length; i++){
-      if(highs[i]==null||lows[i]==null||closes[i-1]==null) continue;
-      const tr = Math.max(
-        highs[i] - lows[i],
-        Math.abs(highs[i] - closes[i-1]),
-        Math.abs(lows[i]  - closes[i-1])
-      );
-      trList.push(tr);
+    const h=candles.h, l=candles.l, c=candles.c;
+    if(!h||h.length<2) return null;
+    const trs=[];
+    for(let i=1;i<h.length;i++){
+      if(h[i]==null||l[i]==null||c[i-1]==null) continue;
+      trs.push(Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1])));
     }
-    const last14 = trList.slice(-14);
-    return last14.reduce((s,v)=>s+v,0) / last14.length;
-  } catch(e){ return null; }
+    const last=trs.slice(-14);
+    return last.length ? last.reduce((s,v)=>s+v,0)/last.length : null;
+  }catch(e){ return null; }
 }
 
-// ── Main scanner ──────────────────────────────────────────────────────
 async function runScanner(){
   const sym = document.getElementById('scannerInput').value.trim().toUpperCase();
-  if(!sym){ setScanStatus('Enter a ticker symbol.', 'var(--red)'); return; }
+  if(!sym){ setScanStatus('Enter a ticker symbol.','var(--red)'); return; }
 
-  document.getElementById('scannerResults').style.display = 'none';
-  setScanStatus('Fetching data for ' + sym + '...', 'var(--amber)');
+  document.getElementById('scannerResults').style.display='none';
+  setScanStatus('Scanning '+sym+' via Finnhub...','var(--amber)');
 
   try{
-    const { summaryData, chartData, newsData } = await fetchYahoo(sym);
+    // Fire all requests in parallel
+    const now    = Math.floor(Date.now()/1000);
+    const from90 = now - 90*24*3600;
+    const from365= now - 365*24*3600;
 
-    if(!summaryData || summaryData.quoteSummary?.error || !summaryData.quoteSummary?.result){
-      const errMsg = summaryData?.quoteSummary?.error?.description || 'Symbol not found or data unavailable.';
-      setScanStatus('Error: ' + errMsg, 'var(--red)');
-      return;
+    const [profile, quote, metrics, floatData, shortData, candles, upgrades, news] =
+      await Promise.all([
+        fhGet('/stock/profile2?symbol='+sym),
+        fhGet('/quote?symbol='+sym),
+        fhGet('/stock/metric?symbol='+sym+'&metric=all'),
+        fhGet('/stock/float?symbol='+sym),
+        fhGet('/stock/short-interest?symbol='+sym+'&from='+
+              new Date(from90*1000).toISOString().slice(0,10)+
+              '&to='+new Date(now*1000).toISOString().slice(0,10)),
+        fhGet('/stock/candle?symbol='+sym+'&resolution=D&from='+from90+'&to='+now),
+        fhGet('/stock/upgrade-downgrade?symbol='+sym+'&from='+
+              new Date(from365*1000).toISOString().slice(0,10)+
+              '&to='+new Date(now*1000).toISOString().slice(0,10)),
+        fhGet('/company-news?symbol='+sym+'&from='+
+              new Date((now-30*24*3600)*1000).toISOString().slice(0,10)+
+              '&to='+new Date(now*1000).toISOString().slice(0,10))
+      ]);
+
+    if(!profile || !profile.name){
+      setScanStatus('Symbol not found: '+sym,'var(--red)'); return;
     }
 
-    const r           = summaryData.quoteSummary.result[0];
-    const detail      = r.summaryDetail       || {};
-    const keyStats    = r.defaultKeyStatistics|| {};
-    const profile     = r.assetProfile        || {};
-    const ratings     = r.upgradeDowngradeHistory || {};
-    const financial   = r.financialData       || {};
-    const price       = r.price               || {};
+    // ── Key values ──────────────────────────────────────────────────
+    const m          = metrics.metric || {};
+    const atr        = calcATR14(candles);
+    const floatSh    = floatData.float            || null;
+    const outstanding= floatData.outstanding       || null;
+    const shortSh    = shortData.data && shortData.data.length
+                         ? shortData.data[shortData.data.length-1].shortInterest : null;
+    const shortPct   = (floatSh && shortSh) ? (shortSh/floatSh*100) : null;
 
-    // ── Extract values ────────────────────────────────────────────────
-    const floatShares      = raw(keyStats, 'floatShares');
-    const sharesShort      = raw(keyStats, 'sharesShort');
-    const shortPctFloat    = raw(keyStats, 'shortPercentOfFloat');
-    const sharesOutstanding= raw(keyStats, 'sharesOutstanding');
-    const marketCap        = raw(price,    'marketCap') || raw(detail, 'marketCap');
-    const avgVolume        = raw(detail,   'averageVolume') || raw(detail,'averageVolume10days');
-    const shortRatio       = raw(keyStats, 'shortRatio');
-    const beta             = raw(detail,   'beta');
-    const ipoDate          = fmt(keyStats, 'lastFiscalYearEnd'); // fallback
-    const atr              = calcATR(chartData);
+    // Market cap: use profile or derive from quote * shares
+    const mktCap     = profile.marketCapitalization
+                         ? profile.marketCapitalization * 1e6
+                         : (quote.c && outstanding ? quote.c * outstanding : null);
 
-    // IPO year — Yahoo doesn't expose directly, use profile foundedYear or parse from listingDate
-    let ipoYear = '—';
-    if(keyStats.lastFiscalYearEnd) ipoYear = '—'; // not reliable for IPO
-    // Best effort: check if profile has any date field
-    if(profile.governanceEpochDate){ 
-      // not IPO but use as rough proxy
-    }
+    const avgVol     = m['10DayAverageTradingVolume']
+                         ? m['10DayAverageTradingVolume'] * 1e6
+                         : null;
 
-    // ── Dilution danger logic ─────────────────────────────────────────
-    const floatM = floatShares ? floatShares/1e6 : null;
-    const shortPct = shortPctFloat ? shortPctFloat*100 : null;
+    // IPO year
+    const ipoYear    = profile.ipo ? profile.ipo.slice(0,4) : '—';
 
+    // ── Dilution danger ────────────────────────────────────────────
+    const floatM = floatSh ? floatSh/1e6 : null;
     let dilutionDanger = 'LOW';
-    if(floatM !== null){
-      if(floatM < 5 || (shortPct && shortPct > 30)) dilutionDanger = 'HIGH';
+    if(floatM!==null){
+      if(floatM < 5  || (shortPct && shortPct > 30)) dilutionDanger = 'HIGH';
       else if(floatM < 20 || (shortPct && shortPct > 15)) dilutionDanger = 'MEDIUM';
     }
 
     let dilutionDetail = '';
-    if(floatShares) dilutionDetail += `Float: ${fmtShares(floatShares)} shares. `;
-    if(sharesShort) dilutionDetail += `Shares short: ${fmtShares(sharesShort)}`;
-    if(shortPctFloat) dilutionDetail += ` (${fmtPct(shortPctFloat)} of float). `;
-    if(shortRatio && raw(keyStats,'shortRatio')) dilutionDetail += `Short ratio (days to cover): ${raw(keyStats,'shortRatio')?.toFixed(1)}. `;
-    if(sharesOutstanding) dilutionDetail += `Shares outstanding: ${fmtShares(sharesOutstanding)}. `;
-    dilutionDetail += `Dilution danger rated ${dilutionDanger} based on float size and short interest. Note: shelf/ATM offering data requires SEC filing lookup.`;
+    if(floatSh)    dilutionDetail += 'Float: '+fmtShares(floatSh)+' shares. ';
+    if(outstanding) dilutionDetail += 'Shares outstanding: '+fmtShares(outstanding)+'. ';
+    if(shortSh)    dilutionDetail += 'Shares short: '+fmtShares(shortSh);
+    if(shortPct)   dilutionDetail += ' ('+shortPct.toFixed(1)+'% of float)';
+    if(shortSh||shortPct) dilutionDetail += '. ';
+    dilutionDetail += 'Dilution rated '+dilutionDanger+' based on float size and short interest. ';
+    dilutionDetail += 'For shelf/S-3 offerings check SEC EDGAR link below.';
 
-    // ── Analyst ratings ───────────────────────────────────────────────
-    const historyList = ratings.history || [];
-    const oneYearAgo  = Date.now()/1000 - 365*24*3600;
-    const recentRatings = historyList
-      .filter(h => h.epochGradeDate > oneYearAgo)
-      .sort((a,b) => b.epochGradeDate - a.epochGradeDate)
-      .slice(0, 15)
-      .map(h => ({
-        date:   new Date(h.epochGradeDate*1000).toISOString().slice(0,10),
-        firm:   h.firm,
-        action: h.action,
-        from:   h.fromGrade,
-        to:     h.toGrade
+    // ── Ratings — last 12 months ───────────────────────────────────
+    const recentRatings = (upgrades||[])
+      .sort((a,b)=> new Date(b.gradeDate)-new Date(a.gradeDate))
+      .slice(0,15)
+      .map(u=>({
+        date:   u.gradeDate,
+        firm:   u.company,
+        action: u.action,
+        from:   u.fromGrade,
+        to:     u.toGrade
       }));
 
-    // ── News ──────────────────────────────────────────────────────────
-    const newsItems = (newsData?.news || []).slice(0,8).map(n=>({
-      headline: n.title,
-      url:      n.link,
-      source:   n.publisher,
-      date:     n.providerPublishTime
-        ? new Date(n.providerPublishTime*1000).toISOString().slice(0,10)
-        : ''
-    }));
+    // ── News — up to 8 articles ────────────────────────────────────
+    const newsItems = (Array.isArray(news)?news:[])
+      .slice(0,8)
+      .map(n=>({
+        headline: n.headline,
+        url:      n.url,
+        source:   n.source,
+        date:     n.datetime
+          ? new Date(n.datetime*1000).toISOString().slice(0,10)
+          : ''
+      }));
 
-    // ── Assemble display object ───────────────────────────────────────
-    const display = {
-      symbol:       sym,
-      companyName:  price.longName || price.shortName || sym,
-      industry:     profile.industry || '—',
-      sector:       profile.sector   || '—',
-      country:      profile.country  || '—',
+    setScanStatus('','');
+
+    renderScannerResults({
+      symbol:        sym,
+      companyName:   profile.name,
+      industry:      profile.finnhubIndustry || '—',
+      sector:        '—',
+      country:       profile.country || '—',
       ipoYear,
-      float:        floatShares ? fmtShares(floatShares) : '—',
-      marketCap:    marketCap   ? fmtBig(marketCap)      : '—',
-      avgVolume:    avgVolume   ? fmtShares(avgVolume)    : '—',
-      shortInterest:shortPctFloat ? fmtPct(shortPctFloat) + (shortRatio?' / '+raw(keyStats,'shortRatio')?.toFixed(1)+'d cover':'') : '—',
-      atr:          atr         ? '$'+atr.toFixed(4)      : '—',
-      shelf:        'See SEC EDGAR',
+      float:         floatSh    ? fmtShares(floatSh)      : '—',
+      marketCap:     mktCap     ? fmtBig(mktCap)           : (profile.marketCapitalization ? fmtBig(profile.marketCapitalization*1e6) : '—'),
+      avgVolume:     avgVol     ? fmtShares(avgVol)         : '—',
+      shortInterest: shortPct   ? shortPct.toFixed(1)+'% of float'+(shortSh?' ('+fmtShares(shortSh)+' shares)':'') : (shortSh ? fmtShares(shortSh)+' shares' : '—'),
+      atr:           atr        ? '$'+atr.toFixed(4)        : '—',
+      shelf:         'See SEC EDGAR link below',
       dilutionDanger,
       dilutionDetail,
-      ratings:      recentRatings,
-      news:         newsItems,
-      finvizUrl:    'https://finviz.com/quote.ashx?t=' + sym,
-      yahooUrl:     'https://finance.yahoo.com/quote/' + sym,
-      secUrl:       'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=&CIK=' + sym + '&type=S-3&dateb=&owner=include&count=10'
-    };
-
-    setScanStatus('', '');
-    renderScannerResults(display);
+      ratings:       recentRatings,
+      news:          newsItems,
+      finvizUrl:     'https://finviz.com/quote.ashx?t='+sym,
+      yahooUrl:      'https://finance.yahoo.com/quote/'+sym,
+      secUrl:        'https://efts.sec.gov/LATEST/search-index?q=%22'+sym+'%22&dateRange=custom&startdt='
+                       +new Date(from365*1000).toISOString().slice(0,10)+'&enddt='
+                       +new Date(now*1000).toISOString().slice(0,10)+'&forms=S-3,424B',
+      finnhubUrl:    'https://finnhub.io/dashboard'
+    });
 
   } catch(err){
-    setScanStatus('Scan failed: ' + err.message, 'var(--red)');
+    setScanStatus('Scan failed: '+err.message,'var(--red)');
     console.error(err);
   }
 }
 
-// ── Render results ────────────────────────────────────────────────────
 function renderScannerResults(d){
-  document.getElementById('sc-symbol').textContent = d.symbol || '—';
-  document.getElementById('sc-name').textContent   = d.companyName || '';
+  document.getElementById('sc-symbol').textContent = d.symbol||'—';
+  document.getElementById('sc-name').textContent   = d.companyName||'';
 
-  const indBadge = document.getElementById('sc-industry-badge');
-  indBadge.textContent = [d.sector, d.industry].filter(x=>x&&x!=='—').join(' / ') || '—';
-  document.getElementById('sc-country-badge').textContent = d.country !== '—' ? d.country : '';
-  document.getElementById('sc-ipo-badge').textContent     = d.ipoYear !== '—' ? 'IPO '+d.ipoYear : '';
+  const ind = document.getElementById('sc-industry-badge');
+  ind.textContent = [d.sector,d.industry].filter(x=>x&&x!=='—').join(' / ') || '—';
+
+  const cb = document.getElementById('sc-country-badge');
+  cb.textContent = (d.country&&d.country!=='—') ? d.country : '';
+
+  const ib = document.getElementById('sc-ipo-badge');
+  ib.textContent = (d.ipoYear&&d.ipoYear!=='—') ? 'IPO '+d.ipoYear : '';
 
   // Dilution badge
-  const danger = d.dilutionDanger.toUpperCase();
+  const danger = (d.dilutionDanger||'LOW').toUpperCase();
   const db = document.getElementById('sc-dilution-badge');
-  const dangerStyles = {
+  const styles = {
     HIGH:   'background:var(--red-dim);color:var(--red);border:1px solid var(--red-mid);',
     MEDIUM: 'background:var(--amber-dim);color:var(--amber);border:1px solid #f5a62335;',
     LOW:    'background:var(--green-dim);color:var(--green);border:1px solid var(--green-mid);'
   };
-  db.textContent = 'DILUTION: ' + danger;
-  db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);' + (dangerStyles[danger]||dangerStyles.LOW);
+  db.textContent = 'DILUTION: '+danger;
+  db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);'+(styles[danger]||styles.LOW);
 
   // Stats
   document.getElementById('sc-float').textContent   = d.float;
@@ -1093,42 +1056,42 @@ function renderScannerResults(d){
   document.getElementById('sc-shelf').textContent   = d.shelf;
 
   // Dilution detail + source links
-  document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail || '—';
+  document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail||'—';
   const old = document.getElementById('sc-source-links');
   if(old) old.remove();
   const linksDiv = document.createElement('div');
   linksDiv.id = 'sc-source-links';
-  linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;';
+  linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;';
   linksDiv.innerHTML = [
-    ['Finviz',          d.finvizUrl],
-    ['Yahoo Finance',   d.yahooUrl],
-    ['SEC Filings (S-3)', d.secUrl]
-  ].map(([label,url])=>
-    `<a href="${url}" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;"
-       onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">↗ ${label}</a>`
+    ['Finviz',             d.finvizUrl],
+    ['Yahoo Finance',      d.yahooUrl],
+    ['SEC S-3 / Shelf filings', d.secUrl]
+  ].map(([lbl,url])=>
+    `<a href="${url}" target="_blank"
+       style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;"
+       onmouseover="this.style.textDecoration='underline'"
+       onmouseout="this.style.textDecoration='none'">↗ ${lbl}</a>`
   ).join('');
   document.getElementById('sc-dilution-detail').after(linksDiv);
 
   // Ratings
   const ratingsEl = document.getElementById('sc-ratings');
   if(d.ratings && d.ratings.length){
-    let html = '';
-    d.ratings.forEach(r => {
+    ratingsEl.innerHTML = d.ratings.map(r=>{
       const act = (r.action||'').toLowerCase();
-      const isUp   = act.includes('up')   || act.includes('init') || act.includes('reit');
+      const isUp   = act.includes('up')   || act.includes('init') || act.includes('reit') || act.includes('main');
       const isDown = act.includes('down');
-      const col = isUp ? 'var(--green)' : isDown ? 'var(--red)' : 'var(--text2)';
-      const change = r.from && r.to ? r.from+' → '+r.to : r.to || r.from || '';
-      html += `<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">
-        <span style="color:var(--text3);min-width:88px;">${r.date}</span>
+      const col    = isUp ? 'var(--green)' : isDown ? 'var(--red)' : 'var(--text2)';
+      const change = r.from && r.to ? r.from+' → '+r.to : r.to||r.from||'';
+      return `<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">
+        <span style="color:var(--text3);min-width:90px;">${r.date}</span>
         <span style="color:var(--text);flex:1;min-width:120px;">${r.firm}</span>
         <span style="color:${col};font-weight:600;">${r.action}${change?' — '+change:''}</span>
       </div>`;
-    });
-    ratingsEl.innerHTML = html;
+    }).join('');
   } else {
     ratingsEl.innerHTML = `<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">
-      No analyst ratings in the last 12 months.
+      No analyst actions in the last 12 months.
       <a href="${d.finvizUrl}#analyst" target="_blank" style="color:var(--blue);">Check Finviz ↗</a>
     </div>`;
   }
@@ -1136,7 +1099,7 @@ function renderScannerResults(d){
   // News
   const newsEl = document.getElementById('sc-news');
   if(d.news && d.news.length){
-    newsEl.innerHTML = d.news.map(n =>
+    newsEl.innerHTML = d.news.map(n=>
       `<div style="padding:9px 0;border-bottom:1px solid var(--border);">
         <a href="${n.url}" target="_blank"
           style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;"
@@ -1146,12 +1109,13 @@ function renderScannerResults(d){
     ).join('');
   } else {
     newsEl.innerHTML = `<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">
-      No news found via Yahoo. <a href="${d.yahooUrl}/news" target="_blank" style="color:var(--blue);">Open Yahoo Finance ↗</a>
+      No recent news found.
+      <a href="${d.yahooUrl}/news" target="_blank" style="color:var(--blue);">Yahoo Finance news ↗</a>
     </div>`;
   }
 
-  document.getElementById('scannerResults').style.display = 'block';
-  document.getElementById('scannerResults').scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById('scannerResults').style.display='block';
+  document.getElementById('scannerResults').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 </script>
