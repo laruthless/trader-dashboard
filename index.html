@@ -500,20 +500,27 @@ async function kvLoadAll(prefix){
 // On load: pull all data from KV and merge into localStorage
 async function syncFromKV(){
   try{
-    // Load history
+    // Load history — KV always wins (it is the source of truth)
     const remoteHist=await kvLoad('pnl_history');
     if(remoteHist){
       const localHist=JSON.parse(localStorage.getItem('pnl_history')||'{}');
-      // Merge: remote wins on conflict (most recently uploaded device wins)
+      // Merge: take all days from both, KV wins on conflict
       const merged=Object.assign({},localHist,remoteHist);
       localStorage.setItem('pnl_history',JSON.stringify(merged));
     }
     // Load all keyed data (journals, checks, acct values, csv data)
+    // KV wins on every key
     const allData=await kvLoadAll('day:');
     Object.entries(allData).forEach(([k,v])=>{
       const localKey=k.replace(/^day:/,'');
-      localStorage.setItem(localKey,typeof v==='string'?v:JSON.stringify(v));
+      const val=typeof v==='string'?v:JSON.stringify(v);
+      localStorage.setItem(localKey,val);
     });
+    // Push any local-only history entries up to KV so all devices get them
+    const currentHist=JSON.parse(localStorage.getItem('pnl_history')||'{}');
+    if(Object.keys(currentHist).length>0){
+      kvSave('pnl_history',currentHist);
+    }
   }catch(e){console.warn('KV sync failed:',e.message);}
 }
 
@@ -999,11 +1006,32 @@ function showDetail(dateKey,rowEl){
   html+=`<div class="dp-section"><div class="dp-stitle">Morning checklist</div>`;
   CK_LABELS.forEach((lbl,i)=>{html+=`<div class="dp-ck"><div class="dp-dot ${ckData[i]?'dot-on':'dot-off'}"></div><span style="${ckData[i]?'color:var(--text2);':'color:var(--text3);'}">${lbl}</span></div>`;});
   html+=`</div>`;
-  if(journal){html+=`<div class="dp-section"><div class="dp-stitle">Journal</div><div class="dp-journal">${journal.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;}
+  // Journal — always show, editable
+  html+=`<div class="dp-section">
+    <div class="dp-stitle" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Journal</span>
+      <span id="dpJournalStatus_${dateKey}" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
+    </div>
+    <textarea id="dpJournal_${dateKey}"
+      style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:12px 14px;font-family:var(--sans);font-size:13px;color:var(--text);line-height:1.6;resize:vertical;min-height:100px;outline:none;"
+      placeholder="Add journal notes for this day..."
+      oninput="saveHistJournal('${dateKey}')">${journal.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+  </div>`;
   const panel=document.getElementById('detailPanel');panel.innerHTML=html;panel.style.display='block';
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'start'}),50);
 }
 function closeDetail(){document.getElementById('detailPanel').style.display='none';document.querySelectorAll('.day-row').forEach(r=>r.classList.remove('selected'));}
+
+function saveHistJournal(dateKey){
+  const ta=document.getElementById('dpJournal_'+dateKey);
+  const st=document.getElementById('dpJournalStatus_'+dateKey);
+  if(!ta||!st)return;
+  const val=ta.value;
+  localStorage.setItem('journal_'+dateKey,val);
+  kvSave('day:journal_'+dateKey,val);
+  st.textContent='Saved';
+  setTimeout(()=>{if(st)st.textContent='';},1500);
+}
 
 function jumpToDate(dateKey){
   if(!dateKey) return;
