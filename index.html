@@ -181,6 +181,33 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;">
+  <div style="width:100%;max-width:360px;padding:0 24px;">
+    <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.2em;color:var(--text3);margin-bottom:8px;">TRADER //</div>
+    <div style="font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text);margin-bottom:32px;">Sign in</div>
+    <div style="margin-bottom:12px;">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.12em;color:var(--text3);margin-bottom:6px;">USERNAME</div>
+      <input id="loginUser" type="text" autocomplete="username" autocapitalize="none"
+        style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:10px 14px;font-family:var(--mono);font-size:15px;color:var(--text);outline:none;"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" />
+    </div>
+    <div style="margin-bottom:20px;">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:0.12em;color:var(--text3);margin-bottom:6px;">PASSWORD</div>
+      <input id="loginPass" type="password" autocomplete="current-password"
+        style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:10px 14px;font-family:var(--mono);font-size:15px;color:var(--text);outline:none;"
+        onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <button onclick="doLogin()"
+      style="width:100%;padding:12px;background:var(--green-dim);border:1px solid var(--green-mid);border-radius:var(--r);font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.1em;color:var(--green);cursor:pointer;transition:all 0.15s;"
+      onmouseover="this.style.background='var(--green-mid)'"
+      onmouseout="this.style.background='var(--green-dim)'">
+      SIGN IN
+    </button>
+    <div id="loginError" style="font-family:var(--mono);font-size:11px;color:var(--red);margin-top:10px;min-height:14px;text-align:center;"></div>
+  </div>
+</div>
+
 <nav class="nav">
   <div class="nav-logo">TRADER //</div>
   <div class="nav-tabs">
@@ -189,7 +216,10 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     <button class="nav-tab" onclick="goPage('analytics',this)">Analytics</button>
     <button class="nav-tab" onclick="goPage('scanner',this)">Scanner</button>
   </div>
-  <div class="nav-right" id="navClock"></div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="nav-right" id="navClock"></div>
+    <button onclick="doLogout()" style="font-family:var(--mono);font-size:10px;background:transparent;border:none;color:var(--text3);cursor:pointer;padding:0;letter-spacing:0.08em;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text3)'">sign out</button>
+  </div>
 </nav>
 
 <!-- TODAY -->
@@ -424,31 +454,45 @@ const setHist=h=>{localStorage.setItem('pnl_history',JSON.stringify(h));kvSave('
 
 // ── Cloudflare KV sync layer ──────────────────────────────────────────
 const KV_URL='https://trader-proxy.mattrlarue.workers.dev';
-const KV_TOKEN='log17mlr415trader1758stat';
-const KV_HEADERS={'Content-Type':'application/json','X-Auth-Token':KV_TOKEN};
+const getKVHeaders=()=>({'Content-Type':'application/json','X-Auth-Token':sessionStorage.getItem('trader_token')||''});
 
 async function kvSave(key,data){
   try{
-    await fetch(KV_URL+'?action=save',{
+    const r=await fetch(KV_URL+'?action=save',{
       method:'POST',
-      headers:KV_HEADERS,
+      headers:getKVHeaders(),
       body:JSON.stringify({key,data})
     });
+    const j=await r.json();
+    if(j.error==='Session expired'||j.error==='Unauthorized'||j.error==='Invalid token'){
+      sessionStorage.removeItem('trader_token');
+      document.getElementById('loginScreen').style.display='flex';
+    }
   }catch(e){console.warn('KV save failed:',e.message);}
 }
 
 async function kvLoad(key){
   try{
-    const r=await fetch(KV_URL+'?action=load&key='+encodeURIComponent(key),{headers:KV_HEADERS});
+    const r=await fetch(KV_URL+'?action=load&key='+encodeURIComponent(key),{headers:getKVHeaders()});
     const j=await r.json();
+    if(j.error==='Session expired'||j.error==='Unauthorized'||j.error==='Invalid token'){
+      sessionStorage.removeItem('trader_token');
+      document.getElementById('loginScreen').style.display='flex';
+      return null;
+    }
     return j.data||null;
   }catch(e){return null;}
 }
 
 async function kvLoadAll(prefix){
   try{
-    const r=await fetch(KV_URL+'?action=loadall&prefix='+encodeURIComponent(prefix),{headers:KV_HEADERS});
+    const r=await fetch(KV_URL+'?action=loadall&prefix='+encodeURIComponent(prefix),{headers:getKVHeaders()});
     const j=await r.json();
+    if(j.error==='Session expired'||j.error==='Unauthorized'||j.error==='Invalid token'){
+      sessionStorage.removeItem('trader_token');
+      document.getElementById('loginScreen').style.display='flex';
+      return {};
+    }
     return j.data||{};
   }catch(e){return {};}
 }
@@ -811,7 +855,49 @@ function toggleExecs(el){
   el.textContent=(open?'▼':'▶')+el.textContent.slice(1);
 }
 
+// ── Login / session ──────────────────────────────────────────────────
+async function doLogin(){
+  const user=document.getElementById('loginUser').value.trim();
+  const pass=document.getElementById('loginPass').value;
+  const errEl=document.getElementById('loginError');
+  errEl.textContent='';
+  if(!user||!pass){errEl.textContent='Enter username and password.';return;}
+  try{
+    const r=await fetch(KV_URL+'?action=login',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:user,password:pass})
+    });
+    const j=await r.json();
+    if(j.error){errEl.textContent=j.error==='Invalid credentials'?'Incorrect username or password.':j.error;return;}
+    sessionStorage.setItem('trader_token',j.token);
+    sessionStorage.setItem('trader_token_expires',j.expires);
+    document.getElementById('loginScreen').style.display='none';
+    startApp();
+  }catch(e){errEl.textContent='Login failed. Check your connection.';}
+}
+
+function doLogout(){
+  sessionStorage.removeItem('trader_token');
+  sessionStorage.removeItem('trader_token_expires');
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+}
+
+function checkSession(){
+  const token=sessionStorage.getItem('trader_token');
+  const expires=parseInt(sessionStorage.getItem('trader_token_expires')||'0');
+  if(!token||Date.now()>expires){
+    document.getElementById('loginScreen').style.display='flex';
+    return false;
+  }
+  document.getElementById('loginScreen').style.display='none';
+  return true;
+}
+
 // Restore CSV on load, then sync from KV
+async function startApp(){
 (async function(){
   // First restore today's CSV from local cache instantly
   const saved=localStorage.getItem('csv_'+todayStr());
@@ -835,6 +921,12 @@ function toggleExecs(el){
   syncEl.textContent='Synced';
   setTimeout(()=>syncEl.remove(),2000);
 })();
+} // end startApp
+
+// Check session on page load
+if(checkSession()){
+  startApp();
+}
 
 // ── News ──────────────────────────────────────────────────────────────
 async function loadNews(){
