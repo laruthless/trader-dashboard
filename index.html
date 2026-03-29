@@ -349,6 +349,8 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 <!-- HISTORY -->
 <div class="page" id="page-history">
   <div class="hdr"><div><div class="hdr-lbl">Archive</div><div class="hdr-date">Trading history</div></div></div>
+
+  <!-- All-time summary -->
   <div class="card">
     <div class="card-title">All-time summary</div>
     <div class="hist-top">
@@ -358,6 +360,19 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
       <div class="stat"><div class="stat-lbl">Best day</div><div class="stat-val pos" id="ht-best">—</div></div>
     </div>
   </div>
+
+  <!-- Jump to any date -->
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Jump to any trading day</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <input type="date" id="histDatePicker"
+        style="background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--mono);font-size:14px;color:var(--text);outline:none;cursor:pointer;"
+        onchange="jumpToDate(this.value)" />
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text3);">Select any weekday to view or edit — even if no data was entered</span>
+    </div>
+  </div>
+
+  <!-- Filter controls -->
   <div class="hist-controls">
     <select id="histFilter" onchange="renderHistPage()">
       <option value="all">All time</option>
@@ -371,6 +386,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
       <option value="pnl-asc">Worst P&amp;L first</option>
     </select>
   </div>
+
   <div id="histList"></div>
   <div class="detail-panel" id="detailPanel" style="display:none;"></div>
 </div>
@@ -821,7 +837,25 @@ function showDetail(dateKey,rowEl){
 }
 function closeDetail(){document.getElementById('detailPanel').style.display='none';document.querySelectorAll('.day-row').forEach(r=>r.classList.remove('selected'));}
 
-function showEditPanel(dateKey){
+function jumpToDate(dateKey){
+  if(!dateKey) return;
+  // Reject weekends
+  const wd = new Date(dateKey+'T12:00:00').getDay();
+  if(wd===0||wd===6){
+    alert('Weekends are not trading days. Please select a weekday.');
+    document.getElementById('histDatePicker').value='';
+    return;
+  }
+  // Close any open panels
+  closeDetail();
+  closeEditPanel();
+  // Scroll histList into view
+  document.getElementById('histList').scrollIntoView({behavior:'smooth',block:'start'});
+  // Open the edit panel for this date (works even with no existing data)
+  showEditPanel(dateKey, true);
+}
+
+function showEditPanel(dateKey, fromDatePicker=false){
   closeDetail();
   const dt=new Date(dateKey+'T12:00:00');
   const dateLabel=dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
@@ -873,18 +907,21 @@ function showEditPanel(dateKey){
       <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">Enter the corrected net P&L and trade count for this day.</div>
     </div>`;
 
-  // Insert after the day row that was clicked
+  // Insert: if called from date picker, prepend to list; else insert after clicked row
   const list=document.getElementById('histList');
-  // Find the row for this date and insert after it
-  const rows=list.querySelectorAll('.day-row');
-  let inserted=false;
-  rows.forEach(row=>{
-    if(row.innerHTML.includes(dateLabel)){
-      row.after(panel);
-      inserted=true;
-    }
-  });
-  if(!inserted) list.appendChild(panel);
+  if(fromDatePicker){
+    list.prepend(panel);
+  } else {
+    const rows=list.querySelectorAll('.day-row');
+    let inserted=false;
+    rows.forEach(row=>{
+      if(row.innerHTML.includes(dateLabel)){
+        row.after(panel);
+        inserted=true;
+      }
+    });
+    if(!inserted) list.prepend(panel);
+  }
   panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
