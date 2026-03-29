@@ -420,7 +420,64 @@ const todayStr=()=>new Date().toISOString().slice(0,10);
 const fmt=v=>(v>=0?'$':'-$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const cls=v=>v>0?'pos':v<0?'neg':'';
 const getHist=()=>JSON.parse(localStorage.getItem('pnl_history')||'{}');
-const setHist=h=>localStorage.setItem('pnl_history',JSON.stringify(h));
+const setHist=h=>{localStorage.setItem('pnl_history',JSON.stringify(h));kvSave('pnl_history',h);};
+
+// ── Cloudflare KV sync layer ──────────────────────────────────────────
+const KV_URL='https://trader-proxy.mattrlarue.workers.dev';
+const KV_TOKEN='log17mlr415trader1758stat';
+const KV_HEADERS={'Content-Type':'application/json','X-Auth-Token':KV_TOKEN};
+
+async function kvSave(key,data){
+  try{
+    await fetch(KV_URL+'?action=save',{
+      method:'POST',
+      headers:KV_HEADERS,
+      body:JSON.stringify({key,data})
+    });
+  }catch(e){console.warn('KV save failed:',e.message);}
+}
+
+async function kvLoad(key){
+  try{
+    const r=await fetch(KV_URL+'?action=load&key='+encodeURIComponent(key),{headers:KV_HEADERS});
+    const j=await r.json();
+    return j.data||null;
+  }catch(e){return null;}
+}
+
+async function kvLoadAll(prefix){
+  try{
+    const r=await fetch(KV_URL+'?action=loadall&prefix='+encodeURIComponent(prefix),{headers:KV_HEADERS});
+    const j=await r.json();
+    return j.data||{};
+  }catch(e){return {};}
+}
+
+// On load: pull all data from KV and merge into localStorage
+async function syncFromKV(){
+  try{
+    // Load history
+    const remoteHist=await kvLoad('pnl_history');
+    if(remoteHist){
+      const localHist=JSON.parse(localStorage.getItem('pnl_history')||'{}');
+      // Merge: remote wins on conflict (most recently uploaded device wins)
+      const merged=Object.assign({},localHist,remoteHist);
+      localStorage.setItem('pnl_history',JSON.stringify(merged));
+    }
+    // Load all keyed data (journals, checks, acct values, csv data)
+    const allData=await kvLoadAll('day:');
+    Object.entries(allData).forEach(([k,v])=>{
+      const localKey=k.replace(/^day:/,'');
+      localStorage.setItem(localKey,typeof v==='string'?v:JSON.stringify(v));
+    });
+  }catch(e){console.warn('KV sync failed:',e.message);}
+}
+
+// Wrapped localStorage setters that also push to KV
+function kvSetItem(key,value){
+  localStorage.setItem(key,value);
+  kvSave('day:'+key,value);
+}
 
 // ── Clock ─────────────────────────────────────────────────────────────
 function tick(){
@@ -448,7 +505,7 @@ function goPage(name,btn){
 // ── Checklist ─────────────────────────────────────────────────────────
 let checks=JSON.parse(localStorage.getItem('checks_'+todayStr())||'[false,false,false,false,false,false]');
 function renderCks(){checks.forEach((c,i)=>{const e=document.getElementById('ck'+i);if(e){if(c)e.classList.add('done');else e.classList.remove('done');}});}
-function toggleCk(i){checks[i]=!checks[i];localStorage.setItem('checks_'+todayStr(),JSON.stringify(checks));renderCks();}
+function toggleCk(i){checks[i]=!checks[i];kvSetItem('checks_'+todayStr(),JSON.stringify(checks));renderCks();}
 renderCks();
 
 // ── Risk ──────────────────────────────────────────────────────────────
@@ -460,16 +517,16 @@ function calcRisk(){
   if(isNaN(v)||v<=0){document.getElementById('riskGrid').style.display='none';document.getElementById('riskBtn').style.display='none';return;}
   document.getElementById('r05').textContent=fmt(v*0.005);document.getElementById('r1').textContent=fmt(v*0.01);document.getElementById('r2').textContent=fmt(v*0.02);
   document.getElementById('riskGrid').style.display='grid';document.getElementById('riskBtn').style.display='block';
-  localStorage.setItem('acct_'+todayStr(),v);
+  kvSetItem('acct_'+todayStr(),String(v));
 }
 function confirmRisk(){
   const b=document.getElementById('riskBtn');b.classList.add('ok');b.textContent='✓ HOTKEYS CONFIRMED UPDATED';
-  localStorage.setItem('riskDone_'+todayStr(),'true');if(!checks[0])toggleCk(0);
+  kvSetItem('riskDone_'+todayStr(),'true');if(!checks[0])toggleCk(0);
 }
 
 // ── Manual trades ─────────────────────────────────────────────────────
 let trades=JSON.parse(localStorage.getItem('trades_'+todayStr())||'[]');
-function saveTrades(){localStorage.setItem('trades_'+todayStr(),JSON.stringify(trades));syncHistory();}
+function saveTrades(){kvSetItem('trades_'+todayStr(),JSON.stringify(trades));syncHistory();}
 function addTrade(){
   const a=parseFloat(document.getElementById('tAmt').value);
   const s=document.getElementById('tSym').value.trim().toUpperCase()||'—';
@@ -536,7 +593,7 @@ function renderSummary(period){
 const jSaved=localStorage.getItem('journal_'+todayStr());
 if(jSaved)document.getElementById('jta').value=jSaved;
 let jTimer;
-function saveJournal(){clearTimeout(jTimer);jTimer=setTimeout(()=>{localStorage.setItem('journal_'+todayStr(),document.getElementById('jta').value);const s=document.getElementById('jStatus');s.textContent='Saved';setTimeout(()=>s.textContent='',1500);},400);}
+function saveJournal(){clearTimeout(jTimer);jTimer=setTimeout(()=>{kvSetItem('journal_'+todayStr(),document.getElementById('jta').value);const s=document.getElementById('jStatus');s.textContent='Saved';setTimeout(()=>s.textContent='',1500);},400);}
 
 // ══════════════════════════════════════════════════════════════════════
 // ── P&L ENGINE: go-flat trades, average cost basis ────────────────────
@@ -711,7 +768,7 @@ function renderCSVResults(tradelist,filename){
   // Save
   const tradeSum=tradelist.map(t=>({sym:t.sym,pnl:t.pnl,execs:t.executions.length,isOpen:!!t.isOpen}));
   syncHistory({pnl:totalPnl,count:closed.length,trades:[],tradeDetails:tradeSum,fromCSV:true});
-  localStorage.setItem('csv_'+todayStr(),JSON.stringify(tradelist));
+  kvSetItem('csv_'+todayStr(),JSON.stringify(tradelist));
 
   // Render trade cards
   const container=document.getElementById('csvBreakdown');container.innerHTML='';
@@ -754,10 +811,29 @@ function toggleExecs(el){
   el.textContent=(open?'▼':'▶')+el.textContent.slice(1);
 }
 
-// Restore CSV on load
-(function(){
+// Restore CSV on load, then sync from KV
+(async function(){
+  // First restore today's CSV from local cache instantly
   const saved=localStorage.getItem('csv_'+todayStr());
   if(saved){try{renderCSVResults(JSON.parse(saved),'(previously loaded)');}catch(e){}}
+
+  // Then pull latest data from KV (cross-device sync)
+  const syncEl=document.createElement('div');
+  syncEl.style.cssText='position:fixed;bottom:16px;right:16px;font-family:var(--mono);font-size:10px;color:var(--text3);background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);padding:6px 12px;z-index:999;';
+  syncEl.textContent='Syncing...';
+  document.body.appendChild(syncEl);
+
+  await syncFromKV();
+
+  // After KV sync, re-render today's CSV if KV had newer data
+  const kvCsv=localStorage.getItem('csv_'+todayStr());
+  if(kvCsv){try{renderCSVResults(JSON.parse(kvCsv),'(synced)');}catch(e){}}
+
+  // Re-render trades in case KV had updates
+  renderTrades();
+
+  syncEl.textContent='Synced';
+  setTimeout(()=>syncEl.remove(),2000);
 })();
 
 // ── News ──────────────────────────────────────────────────────────────
@@ -962,7 +1038,7 @@ function processEditCSV(file,dateKey){
       setHist(h);
 
       // Save the full CSV data for that date
-      localStorage.setItem('csv_'+dateKey,JSON.stringify(tradelist));
+      kvSetItem('csv_'+dateKey,JSON.stringify(tradelist));
 
       const statusEl=document.getElementById('editUploadStatus');
       statusEl.textContent='✓ Updated — '+closed.length+' trades, '+fmt(totalPnl)+' net P&L';
