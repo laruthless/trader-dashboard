@@ -543,6 +543,14 @@ async function syncFromKV(){
     if(Object.keys(currentHist).length>0){
       kvSave('pnl_history',currentHist);
     }
+    // Sync today's watchlist
+    const remoteWL=await kvLoad('watchlist_'+todayStr());
+    if(remoteWL&&Array.isArray(remoteWL)&&remoteWL.length>0){
+      localStorage.setItem('watchlist_'+todayStr(),JSON.stringify(remoteWL));
+      watchlist=remoteWL;
+      renderWatchlist();
+      watchlist.forEach((item,i)=>fetchWatchlistData(i));
+    }
   }catch(e){console.warn('KV sync failed:',e.message);}
 }
 
@@ -1031,6 +1039,21 @@ function showDetail(dateKey,rowEl){
   html+=`<div class="dp-section"><div class="dp-stitle">Morning checklist</div>`;
   CK_LABELS.forEach((lbl,i)=>{html+=`<div class="dp-ck"><div class="dp-dot ${ckData[i]?'dot-on':'dot-off'}"></div><span style="${ckData[i]?'color:var(--text2);':'color:var(--text3);'}">${lbl}</span></div>`;});
   html+=`</div>`;
+  // Watchlist for this day
+  const dayWatchlist = v.watchlist || [];
+  if(dayWatchlist.length){
+    html+=`<div class="dp-section"><div class="dp-stitle">Watchlist</div>`;
+    dayWatchlist.forEach(w=>{
+      const sym = typeof w === 'string' ? w : w.sym;
+      const note = typeof w === 'string' ? '' : (w.note||'');
+      html+=`<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;">
+        <span style="color:var(--blue);font-weight:600;min-width:60px;">${sym}</span>
+        <span style="color:var(--text3);font-size:11px;font-family:var(--sans);">${note}</span>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
   // Journal — always show, editable
   html+=`<div class="dp-section">
     <div class="dp-stitle" style="display:flex;justify-content:space-between;align-items:center;">
@@ -1042,6 +1065,27 @@ function showDetail(dateKey,rowEl){
       placeholder="Add journal notes for this day..."
       oninput="saveHistJournal('${dateKey}')">${journal.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
   </div>`;
+
+  // Watchlist for this date
+  const wlRaw=localStorage.getItem('watchlist_'+dateKey);
+  let wlData=null;
+  if(wlRaw){try{wlData=JSON.parse(wlRaw);}catch(e){}}
+  if(!wlData&&v.watchlist&&v.watchlist.length){
+    wlData=v.watchlist.map(s=>({sym:s.split(' — ')[0],note:s.split(' — ')[1]||''}));
+  }
+  if(wlData&&wlData.length){
+    html+=`<div class="dp-section"><div class="dp-stitle">Watchlist</div>`;
+    wlData.forEach(w=>{
+      const sym=typeof w==='string'?w.split(' — ')[0]:w.sym;
+      const note=typeof w==='string'?(w.split(' — ')[1]||''):(w.note||'');
+      html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--blue);font-weight:500;">${sym}</span>
+        <span style="font-size:12px;color:var(--text3);">${note}</span>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
   const panel=document.getElementById('detailPanel');panel.innerHTML=html;panel.style.display='block';
   setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'start'}),50);
 }
@@ -1251,22 +1295,29 @@ function renderAnalytics(){
 let watchlist = [];
 
 async function loadWatchlist() {
-  // Try KV first, fall back to localStorage
-  const remote = await kvLoad('watchlist');
+  const today = todayStr();
+  // Always load today's watchlist by date key — fresh each day automatically
+  const remote = await kvLoad('watchlist_' + today);
   if (remote && Array.isArray(remote)) {
     watchlist = remote;
   } else {
-    const local = localStorage.getItem('watchlist');
+    const local = localStorage.getItem('watchlist_' + today);
     watchlist = local ? JSON.parse(local) : [];
   }
   renderWatchlist();
-  // Fetch live data for all items
   watchlist.forEach((item, i) => fetchWatchlistData(i));
 }
 
 function saveWatchlist() {
-  localStorage.setItem('watchlist', JSON.stringify(watchlist));
-  kvSave('watchlist', watchlist);
+  const today = todayStr();
+  // Save under today's date key
+  localStorage.setItem('watchlist_' + today, JSON.stringify(watchlist));
+  kvSave('watchlist_' + today, watchlist);
+  // Also update pnl_history with watchlist summary for this day
+  const h = getHist();
+  if (!h[today]) h[today] = {pnl:0,count:0,trades:[],fromCSV:false};
+  h[today].watchlist = watchlist.map(w => ({sym:w.sym,note:w.note||''}));
+  setHist(h);
 }
 
 async function addWatchlistItem() {
