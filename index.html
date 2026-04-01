@@ -250,6 +250,40 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     <button class="confirm-btn" id="riskBtn" onclick="confirmRisk()" style="display:none;">CONFIRM — HOTKEYS UPDATED IN DAS TRADER PRO</button>
   </div>
 
+  <!-- WATCHLIST -->
+  <div class="card" id="watchlistCard">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Watchlist</span>
+      <span id="wlSyncStatus" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="wlTicker" type="text" placeholder="Ticker" autocapitalize="characters"
+        style="width:90px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--mono);font-size:14px;color:var(--text);outline:none;text-transform:uppercase;"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')document.getElementById('wlNote').focus()" />
+      <input id="wlNote" type="text" placeholder="Notes / reason for watching"
+        style="flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--sans);font-size:13px;color:var(--text);outline:none;"
+        onkeydown="if(event.key==='Enter')addWatchlistItem()" />
+      <button onclick="addWatchlistItem()"
+        style="background:transparent;border:1px solid var(--border2);border-radius:var(--r);padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;white-space:nowrap;transition:all 0.15s;"
+        onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+        onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">+ Add</button>
+    </div>
+    <div id="watchlistItems"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Trading journal — <span id="jDateLbl" style="color:var(--text3);font-weight:400;"></span></div>
+    <textarea class="jta" id="jta" placeholder="Pre-market plan, trade rationale, emotions, lessons learned..." oninput="saveJournal()"></textarea>
+    <div class="j-saved" id="jStatus"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Pre-market movers &amp; news</div>
+    <div id="newsArea"><div class="news-loading">Fetching pre-market data...</div></div>
+    <button class="refresh-btn" onclick="loadNews()">↻ REFRESH</button>
+  </div>
+
   <div class="card">
     <div class="card-title">P&amp;L tracker</div>
     <div class="tabs">
@@ -290,28 +324,6 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     </div>
   </div>
 
-  <!-- WATCHLIST -->
-  <div class="card" id="watchlistCard">
-    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>Watchlist</span>
-      <span id="wlSyncStatus" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-      <input id="wlTicker" type="text" placeholder="Ticker" autocapitalize="characters"
-        style="width:90px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--mono);font-size:14px;color:var(--text);outline:none;text-transform:uppercase;"
-        oninput="this.value=this.value.toUpperCase()"
-        onkeydown="if(event.key==='Enter')document.getElementById('wlNote').focus()" />
-      <input id="wlNote" type="text" placeholder="Notes / reason for watching"
-        style="flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:8px 12px;font-family:var(--sans);font-size:13px;color:var(--text);outline:none;"
-        onkeydown="if(event.key==='Enter')addWatchlistItem()" />
-      <button onclick="addWatchlistItem()"
-        style="background:transparent;border:1px solid var(--border2);border-radius:var(--r);padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;white-space:nowrap;transition:all 0.15s;"
-        onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
-        onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">+ Add</button>
-    </div>
-    <div id="watchlistItems"></div>
-  </div>
-
   <div class="card">
     <div class="card-title">DAS Trader Pro — import executions</div>
     <div class="upload-zone" id="dropZone"
@@ -324,18 +336,6 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
       <div class="upload-sub">Each upload replaces today — upload anytime to refresh</div>
     </div>
     <div class="upload-status" id="uploadStatus"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Pre-market movers &amp; news</div>
-    <div id="newsArea"><div class="news-loading">Fetching pre-market data...</div></div>
-    <button class="refresh-btn" onclick="loadNews()">↻ REFRESH</button>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Trading journal — <span id="jDateLbl" style="color:var(--text3);font-weight:400;"></span></div>
-    <textarea class="jta" id="jta" placeholder="Pre-market plan, trade rationale, emotions, lessons learned..." oninput="saveJournal()"></textarea>
-    <div class="j-saved" id="jStatus"></div>
   </div>
 </div>
 
