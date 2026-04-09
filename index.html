@@ -231,12 +231,15 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 
   <div class="card">
     <div class="card-title">Morning checklist</div>
-    <div class="ck-item" id="ck0" onclick="toggleCk(0)"><div class="ck-box"></div><span class="ck-txt">Setup camera</span></div>
-    <div class="ck-item" id="ck1" onclick="toggleCk(1)"><div class="ck-box"></div><span class="ck-txt">Setup TOS scanners</span></div>
-    <div class="ck-item" id="ck2" onclick="toggleCk(2)"><div class="ck-box"></div><span class="ck-txt">Turn on sun lamp</span></div>
-    <div class="ck-item" id="ck3" onclick="toggleCk(3)"><div class="ck-box"></div><span class="ck-txt">Review yesterday's journal</span></div>
-    <div class="ck-item" id="ck4" onclick="toggleCk(4)"><div class="ck-box"></div><span class="ck-txt">Update DAS keys</span></div>
-    <div class="ck-item" id="ck5" onclick="toggleCk(5)"><div class="ck-box"></div><span class="ck-txt">Create watchlist</span></div>
+    <div class="ck-item" id="ck0" onclick="toggleCk(0)"><div class="ck-box"></div><span class="ck-txt">Take AM medicine</span></div>
+    <div class="ck-item" id="ck1" onclick="toggleCk(1)"><div class="ck-box"></div><span class="ck-txt">Take AM gummies</span></div>
+    <div class="ck-item" id="ck2" onclick="toggleCk(2)"><div class="ck-box"></div><span class="ck-txt">Eat breakfast</span></div>
+    <div class="ck-item" id="ck3" onclick="toggleCk(3)"><div class="ck-box"></div><span class="ck-txt">Setup camera</span></div>
+    <div class="ck-item" id="ck4" onclick="toggleCk(4)"><div class="ck-box"></div><span class="ck-txt">Setup TOS scanners</span></div>
+    <div class="ck-item" id="ck5" onclick="toggleCk(5)"><div class="ck-box"></div><span class="ck-txt">Turn on sun lamp</span></div>
+    <div class="ck-item" id="ck6" onclick="toggleCk(6)"><div class="ck-box"></div><span class="ck-txt">Review yesterday's journal</span></div>
+    <div class="ck-item" id="ck7" onclick="toggleCk(7)"><div class="ck-box"></div><span class="ck-txt">Update DAS keys</span></div>
+    <div class="ck-item" id="ck8" onclick="toggleCk(8)"><div class="ck-box"></div><span class="ck-txt">Create watchlist</span></div>
   </div>
 
   <div class="card">
@@ -467,7 +470,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 // ── Helpers ───────────────────────────────────────────────────────────
-const CK_LABELS=['Setup camera','Setup TOS scanners','Turn on sun lamp','Review yesterday\'s journal','Update DAS keys','Create watchlist'];
+const CK_LABELS=['Take AM medicine','Take AM gummies','Eat breakfast','Setup camera','Setup TOS scanners','Turn on sun lamp','Review yesterday\'s journal','Update DAS keys','Create watchlist'];
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const fmt=v=>(v>=0?'$':'-$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const cls=v=>v>0?'pos':v<0?'neg':'';
@@ -584,7 +587,7 @@ function goPage(name,btn){
 }
 
 // ── Checklist ─────────────────────────────────────────────────────────
-let checks=JSON.parse(localStorage.getItem('checks_'+todayStr())||'[false,false,false,false,false,false]');
+let checks=JSON.parse(localStorage.getItem('checks_'+todayStr())||'[false,false,false,false,false,false,false,false,false]');
 function renderCks(){checks.forEach((c,i)=>{const e=document.getElementById('ck'+i);if(e){if(c)e.classList.add('done');else e.classList.remove('done');}});}
 function toggleCk(i){checks[i]=!checks[i];kvSetItem('checks_'+todayStr(),JSON.stringify(checks));renderCks();}
 renderCks();
