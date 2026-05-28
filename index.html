@@ -283,60 +283,6 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
     <div id="newsArea"><div class="news-loading">Fetching pre-market data...</div></div>
     <button class="refresh-btn" onclick="loadNews()">↻ REFRESH</button>
   </div>
-
-  <div class="card">
-    <div class="card-title">P&amp;L tracker</div>
-    <div class="tabs">
-      <button class="tab-btn active" onclick="switchPnlTab('today',this)">Today</button>
-      <button class="tab-btn" onclick="switchPnlTab('week',this)">Week</button>
-      <button class="tab-btn" onclick="switchPnlTab('month',this)">Month</button>
-    </div>
-    <div class="tab-pane active" id="pnl-today">
-      <div class="stat-row">
-        <div class="stat"><div class="stat-lbl">Net P&amp;L</div><div class="stat-val" id="s-pnl">$0.00</div></div>
-        <div class="stat"><div class="stat-lbl">Trades</div><div class="stat-val" id="s-ct">0</div></div>
-        <div class="stat"><div class="stat-lbl">Win rate</div><div class="stat-val" id="s-wr">—</div></div>
-      </div>
-      <div id="csvBadge" style="display:none;"><span class="csv-badge">&#9679; DAS import — <span id="csvFileName"></span></span></div>
-      <div id="csvBreakdown"></div>
-      <div id="manualEntry">
-        <div class="add-row">
-          <input type="number" id="tAmt" placeholder="P&amp;L ($)"/>
-          <input type="text" id="tSym" placeholder="Ticker" style="text-transform:uppercase;"/>
-          <button class="add-btn" onclick="addTrade()">+ Add</button>
-        </div>
-        <div id="tradeList"></div>
-      </div>
-    </div>
-    <div class="tab-pane" id="pnl-week">
-      <div class="sum-grid">
-        <div class="stat"><div class="stat-lbl">Week P&amp;L</div><div class="stat-val" id="w-pnl">$0.00</div></div>
-        <div class="stat"><div class="stat-lbl">Days</div><div class="stat-val" id="w-days">0</div></div>
-      </div>
-      <table class="ht"><thead><tr><th>Date</th><th>P&amp;L</th><th>Trades</th></tr></thead><tbody id="w-body"></tbody></table>
-    </div>
-    <div class="tab-pane" id="pnl-month">
-      <div class="sum-grid">
-        <div class="stat"><div class="stat-lbl">Month P&amp;L</div><div class="stat-val" id="m-pnl">$0.00</div></div>
-        <div class="stat"><div class="stat-lbl">Days</div><div class="stat-val" id="m-days">0</div></div>
-      </div>
-      <table class="ht"><thead><tr><th>Date</th><th>P&amp;L</th><th>Trades</th></tr></thead><tbody id="m-body"></tbody></table>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">DAS Trader Pro — import executions</div>
-    <div class="upload-zone" id="dropZone"
-         ondragover="event.preventDefault();this.classList.add('drag')"
-         ondragleave="this.classList.remove('drag')"
-         ondrop="handleDrop(event)">
-      <input type="file" accept=".csv" onchange="handleFileInput(event)"/>
-      <div class="upload-icon">↑</div>
-      <div class="upload-title">Drop CSV or click to browse</div>
-      <div class="upload-sub">Each upload replaces today — upload anytime to refresh</div>
-    </div>
-    <div class="upload-status" id="uploadStatus"></div>
-  </div>
 </div>
 
 <!-- SCANNER -->
@@ -401,6 +347,60 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
 <!-- HISTORY -->
 <div class="page" id="page-history">
   <div class="hdr"><div><div class="hdr-lbl">Archive</div><div class="hdr-date">Trading history</div></div></div>
+
+  <div class="card">
+    <div class="card-title">P&amp;L tracker</div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchPnlTab('today',this)">Today</button>
+      <button class="tab-btn" onclick="switchPnlTab('week',this)">Week</button>
+      <button class="tab-btn" onclick="switchPnlTab('month',this)">Month</button>
+    </div>
+    <div class="tab-pane active" id="pnl-today">
+      <div class="stat-row">
+        <div class="stat"><div class="stat-lbl">Net P&amp;L</div><div class="stat-val" id="s-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-lbl">Trades</div><div class="stat-val" id="s-ct">0</div></div>
+        <div class="stat"><div class="stat-lbl">Win rate</div><div class="stat-val" id="s-wr">—</div></div>
+      </div>
+      <div id="csvBadge" style="display:none;"><span class="csv-badge">&#9679; DAS import — <span id="csvFileName"></span></span></div>
+      <div id="csvBreakdown"></div>
+      <div id="manualEntry">
+        <div class="add-row">
+          <input type="number" id="tAmt" placeholder="P&amp;L ($)"/>
+          <input type="text" id="tSym" placeholder="Ticker" style="text-transform:uppercase;"/>
+          <button class="add-btn" onclick="addTrade()">+ Add</button>
+        </div>
+        <div id="tradeList"></div>
+      </div>
+    </div>
+    <div class="tab-pane" id="pnl-week">
+      <div class="sum-grid">
+        <div class="stat"><div class="stat-lbl">Week P&amp;L</div><div class="stat-val" id="w-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-lbl">Days</div><div class="stat-val" id="w-days">0</div></div>
+      </div>
+      <table class="ht"><thead><tr><th>Date</th><th>P&amp;L</th><th>Trades</th></tr></thead><tbody id="w-body"></tbody></table>
+    </div>
+    <div class="tab-pane" id="pnl-month">
+      <div class="sum-grid">
+        <div class="stat"><div class="stat-lbl">Month P&amp;L</div><div class="stat-val" id="m-pnl">$0.00</div></div>
+        <div class="stat"><div class="stat-lbl">Days</div><div class="stat-val" id="m-days">0</div></div>
+      </div>
+      <table class="ht"><thead><tr><th>Date</th><th>P&amp;L</th><th>Trades</th></tr></thead><tbody id="m-body"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">DAS Trader Pro — import executions</div>
+    <div class="upload-zone" id="dropZone"
+         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="handleDrop(event)">
+      <input type="file" accept=".csv" onchange="handleFileInput(event)"/>
+      <div class="upload-icon">↑</div>
+      <div class="upload-title">Drop CSV or click to browse</div>
+      <div class="upload-sub">Each upload replaces today — upload anytime to refresh</div>
+    </div>
+    <div class="upload-status" id="uploadStatus"></div>
+  </div>
 
   <!-- All-time summary -->
   <div class="card">
