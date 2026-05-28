@@ -1614,6 +1614,33 @@ function renderScannerResults(d) {
     document.getElementById('sc-name').after(pb);
   }
 
+  // Add to Watchlist button
+  var existingWlBtn = document.getElementById('sc-wl-btn');
+  if (existingWlBtn) existingWlBtn.remove();
+  var wlBtn = document.createElement('button');
+  wlBtn.id = 'sc-wl-btn';
+  wlBtn.textContent = '+ Add to Watchlist';
+  wlBtn.style.cssText = 'margin-top:10px;background:transparent;border:1px solid var(--border2);border-radius:var(--r);padding:7px 14px;font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;transition:all 0.15s;';
+  wlBtn.onmouseover = function(){ this.style.borderColor='var(--green)';this.style.color='var(--green)'; };
+  wlBtn.onmouseout  = function(){ this.style.borderColor='var(--border2)';this.style.color='var(--text2)'; };
+  wlBtn.onclick = function(){
+    // Check if already on watchlist
+    if(watchlist.find(function(w){ return w.sym === d.symbol; })){
+      wlBtn.textContent = 'Already on watchlist';
+      wlBtn.style.color = 'var(--amber)';
+      setTimeout(function(){ wlBtn.textContent = '+ Add to Watchlist'; wlBtn.style.color='var(--text2)'; wlBtn.style.borderColor='var(--border2)'; }, 2000);
+      return;
+    }
+    watchlist.push({ sym: d.symbol, note: d.companyName || '', float: '—', short: '—', atr: '—', loading: false });
+    saveWatchlist();
+    renderWatchlist();
+    wlBtn.textContent = '✓ Added to Watchlist';
+    wlBtn.style.borderColor = 'var(--green)';
+    wlBtn.style.color = 'var(--green)';
+    setTimeout(function(){ wlBtn.textContent = '+ Add to Watchlist'; wlBtn.style.color='var(--text2)'; wlBtn.style.borderColor='var(--border2)'; }, 2000);
+  };
+  document.getElementById('sc-name').parentElement.appendChild(wlBtn);
+
   document.getElementById('sc-industry-badge').textContent =
     [d.exchange, d.industry].filter(function(x){ return x && x !== '—'; }).join(' / ') || '—';
   document.getElementById('sc-country-badge').textContent =
