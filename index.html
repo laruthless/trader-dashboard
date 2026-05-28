@@ -327,16 +327,13 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-si
       <div class="stat"><div class="stat-lbl">Avg volume</div><div class="stat-val" id="sc-vol">—</div></div>
       <div class="stat"><div class="stat-lbl">Short interest</div><div class="stat-val" id="sc-short">—</div></div>
       <div class="stat"><div class="stat-lbl">ATR (14d)</div><div class="stat-val" id="sc-atr">—</div></div>
-      <div class="stat"><div class="stat-lbl">Shelf offerings</div><div class="stat-val" id="sc-shelf">—</div></div>
+      <div class="stat"><div class="stat-lbl">RVOL</div><div class="stat-val" id="sc-rvol">—</div></div>
     </div>
     <div class="card" style="margin-bottom:12px;">
       <div class="card-title">Dilution analysis</div>
       <div id="sc-dilution-detail" style="font-size:13px;color:var(--text2);line-height:1.7;"></div>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <div class="card-title">Upgrades &amp; downgrades — last 12 months</div>
-      <div id="sc-ratings"></div>
-    </div>
+
     <div class="card" style="margin-bottom:12px;">
       <div class="card-title">Recent news</div>
       <div id="sc-news"></div>
@@ -1491,29 +1488,34 @@ async function runScanner() {
     var d   = await res.json();
 
     if (d.error) { setScanStatus(d.error, 'var(--red)'); return; }
-    if (!d.ticker) { setScanStatus('Symbol not found: ' + sym, 'var(--red)'); return; }
+    if (!d.ticker || !d.ticker.name) { setScanStatus('Symbol not found: ' + sym, 'var(--red)'); return; }
 
-    var t   = d.ticker    || {};
-    var snap = d.snapshot  || {};
-    var fi  = d.float     || {};
-    var si  = d.shortInterest || {};
-    var atr = d.atr;
+    var t    = d.ticker  || {};
+    var snap = d.snap    || {};
+    var fi   = d.float   || {};
+    var si   = d.short   || {};
+    var atr  = d.atr;
+    var rvol = d.rvol;
 
     // Price & change from snapshot
-    var price    = snap.day && snap.day.c ? snap.day.c : (snap.prevDay && snap.prevDay.c ? snap.prevDay.c : null);
+    var price    = snap.day && snap.day.c ? snap.day.c : null;
     var prevClose= snap.prevDay && snap.prevDay.c ? snap.prevDay.c : null;
-    var pctChg   = (price && prevClose && prevClose !== 0) ? ((price - prevClose) / prevClose * 100) : null;
-    var volume   = snap.day && snap.day.v ? snap.day.v : null;
+    var pctChg   = (price && prevClose && prevClose !== 0)
+      ? (price - prevClose) / prevClose * 100 : null;
+    var todayVol = snap.day && snap.day.v ? snap.day.v : null;
 
-    // Float
-    var floatShares = fi.float || null;
+    // Float from Massive vX endpoint
+    var floatShares = fi.free_float || null;
+    var floatPct    = fi.free_float_percent || null;
 
-    // Short interest
+    // Short interest from Massive v1 endpoint
     var shortShares  = si.short_interest   || null;
     var shortRatio   = si.days_to_cover    || null;
-    var shortPct     = (floatShares && shortShares) ? (shortShares / floatShares * 100) : null;
+    var avgDailyVol  = si.avg_daily_volume || null;
+    var shortPct     = (floatShares && shortShares)
+      ? (shortShares / floatShares * 100) : null;
 
-    // Dilution danger
+    // Dilution danger — based purely on float size and short interest
     var floatM = floatShares ? floatShares / 1e6 : null;
     var dilutionDanger = 'UNKNOWN';
     if (floatM !== null) {
@@ -1522,61 +1524,70 @@ async function runScanner() {
       else                                                   dilutionDanger = 'LOW';
     }
 
+    // Dilution detail — based on available data only, no EDGAR/SEC references
     var dilutionDetail = '';
-    if (floatShares)  dilutionDetail += 'Float: ' + fmtShares(floatShares) + ' shares. ';
-    if (shortShares)  dilutionDetail += 'Shares short: ' + fmtShares(shortShares);
-    if (shortPct)     dilutionDetail += ' (' + shortPct.toFixed(1) + '% of float)';
-    if (shortShares)  dilutionDetail += '. ';
-    if (shortRatio)   dilutionDetail += 'Days to cover: ' + shortRatio.toFixed(1) + '. ';
-    if (dilutionDanger !== 'UNKNOWN') dilutionDetail += 'Dilution danger rated ' + dilutionDanger + '. ';
-    dilutionDetail += 'For shelf/S-3 filings see the SEC EDGAR link below.';
+    if (floatShares) {
+      dilutionDetail += 'Float: ' + fmtShares(floatShares) + ' shares';
+      if (floatPct)   dilutionDetail += ' (' + floatPct.toFixed(1) + '% of shares outstanding)';
+      dilutionDetail += '. ';
+    } else {
+      dilutionDetail += 'Float data not available for this ticker. ';
+    }
+    if (shortShares) {
+      dilutionDetail += 'Short interest: ' + fmtShares(shortShares) + ' shares';
+      if (shortPct)   dilutionDetail += ' (' + shortPct.toFixed(1) + '% of float)';
+      if (shortRatio) dilutionDetail += ', ' + shortRatio.toFixed(1) + ' days to cover';
+      dilutionDetail += '. ';
+    } else {
+      dilutionDetail += 'Short interest data not available. ';
+    }
+    if (dilutionDanger !== 'UNKNOWN') {
+      dilutionDetail += 'Rated ' + dilutionDanger + ' dilution risk based on float size';
+      if (shortPct) dilutionDetail += ' and short interest';
+      dilutionDetail += '.';
+    }
 
-    // Ratings
-    var ratings = (d.ratings || [])
-      .sort(function(a,b){ return new Date(b.date) - new Date(a.date); })
-      .slice(0, 15)
-      .map(function(r){ return { date: r.date, firm: r.analyst, action: r.action_company, from: r.rating_prior, to: r.rating_current, pt: r.pt_current }; });
-
-    // News — Massive includes sentiment
+    // News with Massive sentiment
     var newsItems = (d.news || []).slice(0, 8).map(function(n) {
+      var sentiment = null;
+      if (n.insights && n.insights.length) {
+        var ins = n.insights.find(function(i) { return i.ticker === sym; });
+        if (!ins) ins = n.insights[0];
+        if (ins) sentiment = ins.sentiment;
+      }
       return {
         headline:  n.title,
         url:       n.article_url,
         source:    n.publisher && n.publisher.name ? n.publisher.name : '',
         date:      n.published_utc ? n.published_utc.slice(0, 10) : '',
-        sentiment: n.insights && n.insights[0] ? n.insights[0].sentiment : null
+        sentiment: sentiment
       };
     });
-
-    var today  = new Date().toISOString().slice(0, 10);
-    var yr365  = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
 
     setScanStatus('', '');
     renderScannerResults({
       symbol:        sym,
       companyName:   t.name || sym,
       industry:      t.sic_description || '—',
-      sector:        '—',
-      country:       t.locale === 'us' ? 'US' : (t.locale || '—'),
+      country:       t.locale ? t.locale.toUpperCase() : '—',
       ipoYear:       t.list_date ? t.list_date.slice(0, 4) : '—',
+      exchange:      t.primary_exchange || '—',
       float:         floatShares ? fmtShares(floatShares) : '—',
       marketCap:     t.market_cap ? fmtBig(t.market_cap) : '—',
-      avgVolume:     t.weighted_shares_outstanding ? fmtShares(volume) : (volume ? fmtShares(volume) : '—'),
+      avgVolume:     avgDailyVol ? fmtShares(avgDailyVol) : (todayVol ? fmtShares(todayVol) : '—'),
       shortInterest: shortPct
         ? shortPct.toFixed(1) + '% of float' + (shortRatio ? ' / ' + shortRatio.toFixed(1) + 'd cover' : '')
         : (shortShares ? fmtShares(shortShares) + ' shares' : '—'),
-      atr:           atr ? '$' + atr.toFixed(4) : '—',
-      shelf:         'See SEC EDGAR link below',
-      price:         price ? '$' + price.toFixed(2) : '—',
-      change:        pctChg !== null ? (pctChg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%' : '—',
-      changePos:     pctChg !== null ? pctChg >= 0 : null,
-      dilutionDanger:  dilutionDanger,
-      dilutionDetail:  dilutionDetail,
-      ratings:  ratings,
-      news:     newsItems,
+      atr:  atr  ? '$' + atr.toFixed(4) : '—',
+      rvol: rvol ? rvol.toFixed(2) + 'x' : '—',
+      price:    price    ? '$' + price.toFixed(2) : '—',
+      change:   pctChg !== null ? (pctChg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%' : '—',
+      changePos: pctChg !== null ? pctChg >= 0 : null,
+      dilutionDanger,
+      dilutionDetail,
+      news: newsItems,
       finvizUrl: 'https://finviz.com/quote.ashx?t=' + sym,
       yahooUrl:  'https://finance.yahoo.com/quote/' + sym,
-      secUrl:    'https://efts.sec.gov/LATEST/search-index?q=%22' + sym + '%22&forms=S-3,424B&dateRange=custom&startdt=' + yr365 + '&enddt=' + today
     });
 
   } catch (err) {
@@ -1589,7 +1600,7 @@ function renderScannerResults(d) {
   document.getElementById('sc-symbol').textContent = d.symbol || '—';
   document.getElementById('sc-name').textContent   = d.companyName || '';
 
-  // Price badge next to name
+  // Price badge
   var existingPrice = document.getElementById('sc-price-badge');
   if (existingPrice) existingPrice.remove();
   if (d.price && d.price !== '—') {
@@ -1603,7 +1614,7 @@ function renderScannerResults(d) {
   }
 
   document.getElementById('sc-industry-badge').textContent =
-    [d.sector, d.industry].filter(function(x){ return x && x !== '—'; }).join(' / ') || '—';
+    [d.exchange, d.industry].filter(function(x){ return x && x !== '—'; }).join(' / ') || '—';
   document.getElementById('sc-country-badge').textContent =
     (d.country && d.country !== '—') ? d.country : '';
   document.getElementById('sc-ipo-badge').textContent =
@@ -1621,59 +1632,37 @@ function renderScannerResults(d) {
   db.textContent = 'DILUTION: ' + (danger === 'UNKNOWN' ? 'N/A' : danger);
   db.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;padding:8px 14px;border-radius:var(--r);' + (bstyles[danger] || bstyles.UNKNOWN);
 
+  // Stats
   document.getElementById('sc-float').textContent   = d.float;
   document.getElementById('sc-mktcap').textContent  = d.marketCap;
   document.getElementById('sc-vol').textContent     = d.avgVolume;
   document.getElementById('sc-short').textContent   = d.shortInterest;
   document.getElementById('sc-atr').textContent     = d.atr;
-  document.getElementById('sc-shelf').textContent   = d.shelf;
+  document.getElementById('sc-rvol').textContent    = d.rvol;
 
+  // Dilution detail — no SEC links
   document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail || '—';
   var old = document.getElementById('sc-source-links');
   if (old) old.remove();
   var linksDiv = document.createElement('div');
   linksDiv.id = 'sc-source-links';
   linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;';
-  linksDiv.innerHTML = [
-    ['Finviz',            d.finvizUrl],
-    ['Yahoo Finance',     d.yahooUrl],
-    ['SEC Shelf Filings', d.secUrl]
-  ].map(function(l) {
-    return '<a href="' + l[1] + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; ' + l[0] + '</a>';
-  }).join('');
+  linksDiv.innerHTML =
+    '<a href="' + d.finvizUrl + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; Finviz</a>' +
+    '<a href="' + d.yahooUrl  + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; Yahoo Finance</a>';
   document.getElementById('sc-dilution-detail').after(linksDiv);
 
-  // Ratings
-  var ratingsEl = document.getElementById('sc-ratings');
-  if (d.ratings && d.ratings.length) {
-    ratingsEl.innerHTML = d.ratings.map(function(r) {
-      var act  = (r.action || '').toLowerCase();
-      var isUp = act.indexOf('up') > -1 || act.indexOf('init') > -1 || act.indexOf('reit') > -1 || act.indexOf('main') > -1;
-      var isDn = act.indexOf('down') > -1;
-      var col  = isUp ? 'var(--green)' : isDn ? 'var(--red)' : 'var(--text2)';
-      var chg  = (r.from && r.to) ? r.from + ' → ' + r.to : (r.to || r.from || '');
-      var pt   = r.pt ? ' <span style="color:var(--amber)">PT $' + r.pt + '</span>' : '';
-      return '<div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;flex-wrap:wrap;gap:6px;">' +
-        '<span style="color:var(--text3);min-width:90px;">' + r.date + '</span>' +
-        '<span style="color:var(--text);flex:1;min-width:120px;">' + r.firm + '</span>' +
-        '<span style="color:' + col + ';font-weight:600;">' + r.action + (chg ? ' — ' + chg : '') + pt + '</span>' +
-        '</div>';
-    }).join('');
-  } else {
-    ratingsEl.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0;">No analyst actions in the last 12 months. <a href="' + d.finvizUrl + '#analyst" target="_blank" style="color:var(--blue);">Check Finviz &#8599;</a></div>';
-  }
-
-  // News — with sentiment from Massive
+  // News with sentiment
   var newsEl = document.getElementById('sc-news');
   if (d.news && d.news.length) {
     newsEl.innerHTML = d.news.map(function(n) {
-      var sentCol = n.sentiment === 'positive' ? 'var(--green)' : n.sentiment === 'negative' ? 'var(--red)' : 'var(--text3)';
+      var sentCol   = n.sentiment === 'positive' ? 'var(--green)' : n.sentiment === 'negative' ? 'var(--red)' : '';
       var sentLabel = n.sentiment === 'positive' ? 'BULLISH' : n.sentiment === 'negative' ? 'BEARISH' : '';
       return '<div style="padding:9px 0;border-bottom:1px solid var(--border);">' +
         '<a href="' + n.url + '" target="_blank" style="font-size:13px;color:var(--text);text-decoration:none;line-height:1.5;display:block;margin-bottom:3px;">' + n.headline + '</a>' +
         '<div style="display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text3);">' +
-        n.source + (n.date ? ' &bull; ' + n.date : '') +
-        (sentLabel ? ' <span style="color:' + sentCol + ';">' + sentLabel + '</span>' : '') +
+        (n.source || '') + (n.date ? ' &bull; ' + n.date : '') +
+        (sentLabel ? ' <span style="color:' + sentCol + ';font-weight:600;">' + sentLabel + '</span>' : '') +
         '</div></div>';
     }).join('');
   } else {
