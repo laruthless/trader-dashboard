@@ -1588,6 +1588,7 @@ async function runScanner() {
       news: newsItems,
       finvizUrl: 'https://finviz.com/quote.ashx?t=' + sym,
       yahooUrl:  'https://finance.yahoo.com/quote/' + sym,
+      secUrl:    'https://efts.sec.gov/LATEST/search-index?q=%22' + sym + '%22&forms=S-3,424B&dateRange=custom&startdt=' + new Date(Date.now()-365*86400000).toISOString().slice(0,10) + '&enddt=' + new Date().toISOString().slice(0,10),
     });
 
   } catch (err) {
@@ -1640,7 +1641,7 @@ function renderScannerResults(d) {
   document.getElementById('sc-atr').textContent     = d.atr;
   document.getElementById('sc-rvol').textContent    = d.rvol;
 
-  // Dilution detail — no SEC links
+  // Dilution detail + SEC EDGAR link
   document.getElementById('sc-dilution-detail').textContent = d.dilutionDetail || '—';
   var old = document.getElementById('sc-source-links');
   if (old) old.remove();
@@ -1649,7 +1650,8 @@ function renderScannerResults(d) {
   linksDiv.style.cssText = 'margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;';
   linksDiv.innerHTML =
     '<a href="' + d.finvizUrl + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; Finviz</a>' +
-    '<a href="' + d.yahooUrl  + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; Yahoo Finance</a>';
+    '<a href="' + d.yahooUrl  + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; Yahoo Finance</a>' +
+    '<a href="' + d.secUrl    + '" target="_blank" style="font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;">&#8599; SEC EDGAR — S-3 / Shelf filings</a>';
   document.getElementById('sc-dilution-detail').after(linksDiv);
 
   // News with sentiment
