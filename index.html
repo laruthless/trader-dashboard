@@ -1369,13 +1369,19 @@ async function fetchWatchlistData(i) {
     }
 
     // Price & % change from Massive snapshot
-    const snap     = d.snap     || {};
+    const snapRaw  = d.snap     || {};
+    const snapTick = snapRaw.ticker || snapRaw;
     const fi       = d.float    || {};
     const si       = d.short    || {};
-    const price    = snap.day && snap.day.c ? snap.day.c : null;
-    const prevClose= snap.prevDay && snap.prevDay.c ? snap.prevDay.c : null;
+    const price    = (snapTick.lastTrade && snapTick.lastTrade.p)
+      ? snapTick.lastTrade.p
+      : (snapTick.day && snapTick.day.c ? snapTick.day.c : null);
+    const prevClose= snapTick.prevDay && snapTick.prevDay.c ? snapTick.prevDay.c : null;
+    const todayOpen= snapTick.day && snapTick.day.o ? snapTick.day.o : null;
     const pctChg   = (price && prevClose && prevClose !== 0)
-      ? (price - prevClose) / prevClose * 100 : null;
+      ? (price - prevClose) / prevClose * 100
+      : (price && todayOpen && todayOpen !== 0)
+        ? (price - todayOpen) / todayOpen * 100 : null;
 
     watchlist[i].price     = price    ? '$' + price.toFixed(2) : '—';
     watchlist[i].change    = pctChg !== null
@@ -1524,12 +1530,18 @@ async function runScanner() {
     var atr  = d.atr;
     var rvol = d.rvol;
 
-    // Price & change from snapshot
-    var price    = snap.day && snap.day.c ? snap.day.c : null;
-    var prevClose= snap.prevDay && snap.prevDay.c ? snap.prevDay.c : null;
+    // Price & change — try multiple paths from Massive snapshot response
+    var snapTicker = snap.ticker || snap;
+    var price    = (snapTicker.lastTrade && snapTicker.lastTrade.p)
+      ? snapTicker.lastTrade.p
+      : (snapTicker.day && snapTicker.day.c ? snapTicker.day.c : null);
+    var prevClose= snapTicker.prevDay && snapTicker.prevDay.c ? snapTicker.prevDay.c : null;
+    var todayOpen= snapTicker.day && snapTicker.day.o ? snapTicker.day.o : null;
     var pctChg   = (price && prevClose && prevClose !== 0)
-      ? (price - prevClose) / prevClose * 100 : null;
-    var todayVol = snap.day && snap.day.v ? snap.day.v : null;
+      ? (price - prevClose) / prevClose * 100
+      : (price && todayOpen && todayOpen !== 0)
+        ? (price - todayOpen) / todayOpen * 100 : null;
+    var todayVol = snapTicker.day && snapTicker.day.v ? snapTicker.day.v : null;
 
     // Float from Massive vX endpoint
     var floatShares = fi.free_float || null;
@@ -1539,6 +1551,7 @@ async function runScanner() {
     var shortShares  = si.short_interest   || null;
     var shortRatio   = si.days_to_cover    || null;
     var avgDailyVol  = si.avg_daily_volume || null;
+    if (!todayVol && snapTicker.day) todayVol = snapTicker.day.v || null;
     var shortPct     = (floatShares && shortShares)
       ? (shortShares / floatShares * 100) : null;
 
