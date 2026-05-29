@@ -1355,29 +1355,56 @@ async function fetchWatchlistData(i) {
   try {
     const res = await fetch(WORKER_URL + '?symbol=' + item.sym);
     const d   = await res.json();
-    if (d.error || !d.profile) {
-      watchlist[i].float  = '—';
-      watchlist[i].short  = '—';
-      watchlist[i].atr    = d.error || 'Not found';
-      watchlist[i].loading = false;
+
+    if (d.error || !d.ticker) {
+      watchlist[i].float    = '—';
+      watchlist[i].short    = '—';
+      watchlist[i].atr      = d.error || 'Not found';
+      watchlist[i].price    = '—';
+      watchlist[i].change   = '—';
+      watchlist[i].changePos= null;
+      watchlist[i].loading  = false;
       renderWatchlist();
       return;
     }
-    // ATR from candle data
-    watchlist[i].atr   = d.atr ? '$' + d.atr.toFixed(4) : '—';
-    // Shares outstanding as proxy for float (free tier limitation)
-    const shares = d.profile.shareOutstanding ? d.profile.shareOutstanding * 1e6 : null;
-    watchlist[i].float = shares ? fmtSharesWL(shares) : '—';
-    // Short interest not on free tier — link to Finviz
-    watchlist[i].short = '—';
-    watchlist[i].price = d.quote && d.quote.c ? '$' + d.quote.c.toFixed(2) : '—';
-    watchlist[i].change = d.quote && d.quote.dp != null ? (d.quote.dp >= 0 ? '+' : '') + d.quote.dp.toFixed(2) + '%' : '—';
-    watchlist[i].changePos = d.quote && d.quote.dp != null ? d.quote.dp >= 0 : null;
+
+    // Price & % change from Massive snapshot
+    const snap     = d.snap     || {};
+    const fi       = d.float    || {};
+    const si       = d.short    || {};
+    const price    = snap.day && snap.day.c ? snap.day.c : null;
+    const prevClose= snap.prevDay && snap.prevDay.c ? snap.prevDay.c : null;
+    const pctChg   = (price && prevClose && prevClose !== 0)
+      ? (price - prevClose) / prevClose * 100 : null;
+
+    watchlist[i].price     = price    ? '$' + price.toFixed(2) : '—';
+    watchlist[i].change    = pctChg !== null
+      ? (pctChg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%' : '—';
+    watchlist[i].changePos = pctChg !== null ? pctChg >= 0 : null;
+
+    // Float from Massive vX endpoint
+    const floatShares = fi.free_float || null;
+    watchlist[i].float = floatShares ? fmtSharesWL(floatShares) : '—';
+
+    // Short interest from Massive v1 endpoint
+    const shortShares = si.short_interest || null;
+    const shortPct    = (floatShares && shortShares)
+      ? (shortShares / floatShares * 100).toFixed(1) + '% of float' : null;
+    const shortRatio  = si.days_to_cover || null;
+    watchlist[i].short = shortPct
+      ? shortPct + (shortRatio ? ' / ' + shortRatio.toFixed(1) + 'd cover' : '')
+      : (shortShares ? fmtSharesWL(shortShares) + ' shares' : '—');
+
+    // ATR
+    watchlist[i].atr = d.atr ? '$' + d.atr.toFixed(4) : '—';
+
     watchlist[i].loading = false;
     renderWatchlist();
   } catch(e) {
-    watchlist[i].loading = false;
-    watchlist[i].atr = 'Error';
+    watchlist[i].loading  = false;
+    watchlist[i].atr      = 'Error';
+    watchlist[i].price    = '—';
+    watchlist[i].change   = '—';
     renderWatchlist();
   }
 }
